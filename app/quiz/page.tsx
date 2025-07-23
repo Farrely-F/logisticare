@@ -48,31 +48,35 @@ import {
   useGetQuizProgress,
   useUpdateQuizProgress,
   useDeleteQuizProgress,
+  useEvaluateAnswer,
+  useEvaluateQuiz,
 } from "@/lib/queries";
 import { Question } from "@/lib/db";
 import { toast } from "sonner";
 
 const TOPICS = [
-  'Manajemen Logistik Rumah Sakit',
-  'Sistem Informasi Kesehatan',
-  'Manajemen Persediaan Medis',
-  'Distribusi Obat dan Alkes',
-  'Keselamatan Pasien',
-  'Manajemen Kualitas',
-  'Regulasi Kesehatan',
-  'Farmasi Rumah Sakit'
+  "Manajemen Logistik Rumah Sakit",
+  "Sistem Informasi Kesehatan",
+  "Manajemen Persediaan Medis",
+  "Distribusi Obat dan Alkes",
+  "Keselamatan Pasien",
+  "Manajemen Kualitas",
+  "Regulasi Kesehatan",
+  "Farmasi Rumah Sakit",
 ];
 
 const DIFFICULTIES = [
-  { value: 'beginner', label: 'Pemula' },
-  { value: 'intermediate', label: 'Menengah' },
-  { value: 'advanced', label: 'Lanjutan' },
-  { value: 'mixed', label: 'Campuran' }
+  { value: "beginner", label: "Pemula" },
+  { value: "intermediate", label: "Menengah" },
+  { value: "advanced", label: "Lanjutan" },
+  { value: "mixed", label: "Campuran" },
 ];
 
 export default function QuizPage() {
   const [questions, setQuestions] = useState<Question[]>([]);
-  const [selectedTopic, setSelectedTopic] = useState("Manajemen Logistik Rumah Sakit");
+  const [selectedTopic, setSelectedTopic] = useState(
+    "Manajemen Logistik Rumah Sakit"
+  );
   const [selectedDifficulty, setSelectedDifficulty] = useState("mixed");
   const [questionCount, setQuestionCount] = useState(5);
   const [currentQuestion, setCurrentQuestion] = useState(0);
@@ -86,9 +90,13 @@ export default function QuizPage() {
   const [quizCompleted, setQuizCompleted] = useState(false);
   const [userAnswers, setUserAnswers] = useState<(string | number)[]>([]);
   const [quizStartTime, setQuizStartTime] = useState<Date | null>(null);
-  const [quizMode, setQuizMode] = useState<'generate' | 'existing'>('existing');
+  const [quizMode, setQuizMode] = useState<"generate" | "existing">("existing");
   const [quizPaused, setQuizPaused] = useState(false);
   const [hasResumedQuiz, setHasResumedQuiz] = useState(false);
+  const [answerEvaluations, setAnswerEvaluations] = useState<any[]>([]);
+  const [quizEvaluation, setQuizEvaluation] = useState<any>(null);
+  const [isEvaluating, setIsEvaluating] = useState(false);
+  const [isCompletingQuiz, setIsCompletingQuiz] = useState(false);
 
   // React Query hooks
   const generateQuestionsMutation = useGenerateQuestions();
@@ -100,8 +108,13 @@ export default function QuizPage() {
   const saveQuizProgressMutation = useSaveQuizProgress();
   const updateQuizProgressMutation = useUpdateQuizProgress();
   const deleteQuizProgressMutation = useDeleteQuizProgress();
-  
-  const { data: existingQuestions = [] } = useRandomQuestionsByTopic(selectedTopic, questionCount);
+  const evaluateAnswerMutation = useEvaluateAnswer();
+  const evaluateQuizMutation = useEvaluateQuiz();
+
+  const { data: existingQuestions = [] } = useRandomQuestionsByTopic(
+    selectedTopic,
+    questionCount
+  );
   const { data: questionCountData = 0 } = useQuestionCount(selectedTopic);
   const { data: savedProgress } = useGetQuizProgress(selectedTopic);
 
@@ -111,7 +124,7 @@ export default function QuizPage() {
       const shouldResume = confirm(
         `Ditemukan kuis yang belum selesai untuk topik "${selectedTopic}". Apakah Anda ingin melanjutkan?`
       );
-      
+
       if (shouldResume) {
         setQuestions(savedProgress.questions);
         setCurrentQuestion(savedProgress.currentQuestionIndex);
@@ -149,13 +162,17 @@ export default function QuizPage() {
 
   const loadExistingQuestions = () => {
     if (existingQuestions.length === 0) {
-      toast.error("Tidak ada soal tersedia untuk topik ini. Silakan buat soal baru.");
+      toast.error(
+        "Tidak ada soal tersedia untuk topik ini. Silakan buat soal baru."
+      );
       return;
     }
-    
+
     setQuestions(existingQuestions);
     setUserAnswers(new Array(existingQuestions.length).fill(""));
-    toast.success(`${existingQuestions.length} soal berhasil dimuat dari bank soal!`);
+    toast.success(
+      `${existingQuestions.length} soal berhasil dimuat dari bank soal!`
+    );
   };
 
   // Timer effect
@@ -176,14 +193,21 @@ export default function QuizPage() {
       const autoSave = setInterval(() => {
         saveQuizProgress();
       }, 30000); // Save every 30 seconds
-      
+
       return () => clearInterval(autoSave);
     }
-  }, [quizStarted, quizCompleted, questions, currentQuestion, userAnswers, timeLeft]);
+  }, [
+    quizStarted,
+    quizCompleted,
+    questions,
+    currentQuestion,
+    userAnswers,
+    timeLeft,
+  ]);
 
   const saveQuizProgress = async () => {
     if (!quizStartTime || questions.length === 0) return;
-    
+
     try {
       const progressData = {
         topic: selectedTopic,
@@ -270,35 +294,76 @@ export default function QuizPage() {
   };
 
   const handleQuizComplete = async () => {
-    let correctAnswers = 0;
-    questions.forEach((question, index) => {
-      if (question.type === "short-answer") {
-        // Simple keyword matching for short answers
-        const userAnswer = ((userAnswers[index] as string) || "").toLowerCase();
-        const correctAnswer = question.correctAnswer.toString().toLowerCase();
-        if (
-          userAnswer.includes("verifikasi") &&
-          userAnswer.includes("pemeriksaan") &&
-          userAnswer.includes("pencatatan")
-        ) {
-          correctAnswers++;
-        }
-      } else {
-        if (userAnswers[index] === question.correctAnswer) {
-          correctAnswers++;
-        }
-      }
-    });
-    
-    const finalScore = Math.round((correctAnswers / questions.length) * 100);
-    setScore(finalScore);
-    setQuizCompleted(true);
-
-    // Calculate time spent
-    const timeSpent = quizStartTime ? Math.floor((new Date().getTime() - quizStartTime.getTime()) / 1000) : 0;
+    setIsCompletingQuiz(true);
+    setIsEvaluating(true);
 
     try {
-      // Save quiz session
+      // Evaluate each answer using AI
+      const evaluations = [];
+
+      for (let i = 0; i < questions.length; i++) {
+        const question = questions[i];
+        const userAnswer = userAnswers[i];
+
+        // Convert user answer to proper format for AI evaluation
+        let formattedUserAnswer = "";
+        if (question.type === "multiple-choice" && question.options) {
+          // Convert index to actual option text
+          const answerIndex = parseInt(userAnswer?.toString() || "-1");
+          formattedUserAnswer =
+            answerIndex >= 0 && answerIndex < question.options.length
+              ? question.options[answerIndex]
+              : userAnswer?.toString() || "";
+        } else {
+          formattedUserAnswer = userAnswer?.toString() || "";
+        }
+
+        const evaluation = await evaluateAnswerMutation.mutateAsync({
+          question: question.question,
+          userAnswer: formattedUserAnswer,
+          correctAnswer: question.correctAnswer.toString(),
+          topic: question.topic,
+          questionType: question.type,
+        });
+
+        evaluations.push(evaluation.evaluation);
+      }
+
+      setAnswerEvaluations(evaluations);
+
+      // Calculate overall score from AI evaluations
+      const totalScore = evaluations.reduce(
+        (sum, evaluation) => sum + evaluation.score,
+        0
+      );
+      const finalScore = Math.round(totalScore / evaluations.length);
+      setScore(finalScore);
+
+      // Calculate time spent
+      const timeSpent = quizStartTime
+        ? Math.floor((new Date().getTime() - quizStartTime.getTime()) / 1000)
+        : 0;
+
+      // Get comprehensive quiz evaluation
+      const quizEval = await evaluateQuizMutation.mutateAsync({
+        questions,
+        userAnswers,
+        evaluations,
+        topic: selectedTopic,
+        difficulty: selectedDifficulty,
+        timeSpent,
+        totalQuestions: questions.length,
+      });
+
+      setQuizEvaluation(quizEval.evaluation);
+      setQuizCompleted(true);
+
+      // Count correct answers for progress tracking
+      const correctAnswers = evaluations.filter(
+        (evaluation) => evaluation.isCorrect
+      ).length;
+
+      // Save quiz session with AI evaluations
       await saveQuizSessionMutation.mutateAsync({
         topic: selectedTopic,
         difficulty: selectedDifficulty,
@@ -324,10 +389,13 @@ export default function QuizPage() {
         await deleteQuizProgressMutation.mutateAsync(selectedTopic);
       }
 
-      toast.success("Hasil kuis telah disimpan!");
+      toast.success("Kuis selesai! Evaluasi AI telah dibuat.");
     } catch (error) {
-      console.error("Error saving quiz results:", error);
-      toast.error("Gagal menyimpan hasil kuis.");
+      console.error("Error evaluating quiz:", error);
+      toast.error("Gagal mengevaluasi kuis. Silakan coba lagi.");
+    } finally {
+      setIsEvaluating(false);
+      setIsCompletingQuiz(false);
     }
   };
 
@@ -353,7 +421,7 @@ export default function QuizPage() {
         setShortAnswer("");
         setShowExplanation(false);
         setShowHint(false);
-        
+
         toast.success("Soal berhasil diregenerasi!");
       } catch (error) {
         console.error("Error regenerating question:", error);
@@ -385,7 +453,7 @@ export default function QuizPage() {
       };
       setQuestions(newQuestions);
       setShowExplanation(true);
-      
+
       toast.success("Penjelasan AI berhasil dimuat!");
     } catch (error) {
       console.error("Error getting AI explanation:", error);
@@ -409,7 +477,7 @@ export default function QuizPage() {
       };
       setQuestions(newQuestions);
       setShowHint(true);
-      
+
       toast.success("Petunjuk AI berhasil dimuat!");
     } catch (error) {
       console.error("Error getting AI hint:", error);
@@ -424,7 +492,9 @@ export default function QuizPage() {
           <div className="container mx-auto px-4 py-4">
             <Link href="/" className="flex items-center space-x-2">
               <Home className="w-4 h-4 sm:w-5 sm:h-5" />
-              <span className="font-semibold text-sm sm:text-base">Kembali ke Beranda</span>
+              <span className="font-semibold text-sm sm:text-base">
+                Kembali ke Beranda
+              </span>
             </Link>
           </div>
         </header>
@@ -443,13 +513,25 @@ export default function QuizPage() {
 
             <Card className="mb-8">
               <CardContent className="p-6">
-                <Tabs value={quizMode} onValueChange={(value) => setQuizMode(value as 'generate' | 'existing')} className="w-full">
+                <Tabs
+                  value={quizMode}
+                  onValueChange={(value) =>
+                    setQuizMode(value as "generate" | "existing")
+                  }
+                  className="w-full"
+                >
                   <TabsList className="grid w-full grid-cols-2 mb-6">
-                    <TabsTrigger value="existing" className="flex items-center gap-2">
+                    <TabsTrigger
+                      value="existing"
+                      className="flex items-center gap-2"
+                    >
                       <Database className="w-4 h-4" />
                       Bank Soal ({questionCountData})
                     </TabsTrigger>
-                    <TabsTrigger value="generate" className="flex items-center gap-2">
+                    <TabsTrigger
+                      value="generate"
+                      className="flex items-center gap-2"
+                    >
                       <Brain className="w-4 h-4" />
                       Buat Baru
                     </TabsTrigger>
@@ -491,7 +573,10 @@ export default function QuizPage() {
                           </SelectTrigger>
                           <SelectContent>
                             {DIFFICULTIES.map((difficulty) => (
-                              <SelectItem key={difficulty.value} value={difficulty.value}>
+                              <SelectItem
+                                key={difficulty.value}
+                                value={difficulty.value}
+                              >
                                 {difficulty.label}
                               </SelectItem>
                             ))}
@@ -529,8 +614,9 @@ export default function QuizPage() {
                           <span className="font-semibold">Bank Soal</span>
                         </div>
                         <p className="text-blue-700 text-sm">
-                          Tersedia {questionCountData} soal untuk topik "{selectedTopic}". 
-                          Soal akan dipilih secara acak dari bank soal yang ada.
+                          Tersedia {questionCountData} soal untuk topik "
+                          {selectedTopic}". Soal akan dipilih secara acak dari
+                          bank soal yang ada.
                         </p>
                       </div>
                     </TabsContent>
@@ -542,8 +628,10 @@ export default function QuizPage() {
                           <span className="font-semibold">AI Generator</span>
                         </div>
                         <p className="text-green-700 text-sm">
-                          Soal akan dihasilkan secara otomatis oleh AI berdasarkan topik dan tingkat kesulitan yang dipilih.
-                          Proses ini membutuhkan koneksi internet dan mungkin memakan waktu beberapa detik.
+                          Soal akan dihasilkan secara otomatis oleh AI
+                          berdasarkan topik dan tingkat kesulitan yang dipilih.
+                          Proses ini membutuhkan koneksi internet dan mungkin
+                          memakan waktu beberapa detik.
                         </p>
                       </div>
                     </TabsContent>
@@ -555,29 +643,40 @@ export default function QuizPage() {
             <div className="space-y-3 sm:space-y-4 mb-8">
               <div className="flex items-center justify-center space-x-2 text-gray-600 text-sm sm:text-base">
                 <Target className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
-                <span className="text-center">Progress kuis otomatis tersimpan setiap 30 detik</span>
+                <span className="text-center">
+                  Progress kuis otomatis tersimpan setiap 30 detik
+                </span>
               </div>
               <div className="flex items-center justify-center space-x-2 text-gray-600 text-sm sm:text-base">
                 <Lightbulb className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
-                <span className="text-center">Tutor AI siap membantu dengan penjelasan detail</span>
+                <span className="text-center">
+                  Tutor AI siap membantu dengan penjelasan detail
+                </span>
               </div>
               <div className="flex items-center justify-center space-x-2 text-gray-600 text-sm sm:text-base">
                 <Zap className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
-                <span className="text-center">Kuis dapat dijeda dan dilanjutkan kapan saja</span>
+                <span className="text-center">
+                  Kuis dapat dijeda dan dilanjutkan kapan saja
+                </span>
               </div>
             </div>
 
             {questions.length === 0 ? (
               <Button
                 size="lg"
-                onClick={quizMode === 'existing' ? loadExistingQuestions : generateQuestions}
+                onClick={
+                  quizMode === "existing"
+                    ? loadExistingQuestions
+                    : generateQuestions
+                }
                 disabled={
-                  (quizMode === 'existing' && questionCountData === 0) ||
-                  (quizMode === 'generate' && generateQuestionsMutation.isPending)
+                  (quizMode === "existing" && questionCountData === 0) ||
+                  (quizMode === "generate" &&
+                    generateQuestionsMutation.isPending)
                 }
                 className="bg-gradient-to-r from-blue-600 to-green-600 hover:from-blue-700 hover:to-green-700 text-sm sm:text-base md:text-lg px-6 sm:px-8 py-2 sm:py-3 w-full sm:w-auto"
               >
-                {quizMode === 'existing' ? (
+                {quizMode === "existing" ? (
                   questionCountData === 0 ? (
                     <>
                       <XCircle className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
@@ -586,20 +685,26 @@ export default function QuizPage() {
                   ) : (
                     <>
                       <Shuffle className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
-                      <span className="hidden sm:inline">Muat Soal dari Bank Soal</span>
+                      <span className="hidden sm:inline">
+                        Muat Soal dari Bank Soal
+                      </span>
                       <span className="sm:hidden">Muat Soal</span>
                     </>
                   )
                 ) : generateQuestionsMutation.isPending ? (
                   <>
                     <RefreshCw className="w-4 h-4 sm:w-5 sm:h-5 mr-2 animate-spin" />
-                    <span className="hidden sm:inline">Menghasilkan Soal AI...</span>
+                    <span className="hidden sm:inline">
+                      Menghasilkan Soal AI...
+                    </span>
                     <span className="sm:hidden">Menghasilkan...</span>
                   </>
                 ) : (
                   <>
                     <Brain className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
-                    <span className="hidden sm:inline">Hasilkan Soal dengan AI</span>
+                    <span className="hidden sm:inline">
+                      Hasilkan Soal dengan AI
+                    </span>
                     <span className="sm:hidden">Hasilkan Soal</span>
                   </>
                 )}
@@ -610,11 +715,17 @@ export default function QuizPage() {
                   <div className="flex items-center space-x-2 text-green-800">
                     <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
                     <span className="font-semibold text-sm sm:text-base">
-                      {questions.length} soal berhasil {quizMode === 'existing' ? 'dimuat' : 'dihasilkan'}!
+                      {questions.length} soal berhasil{" "}
+                      {quizMode === "existing" ? "dimuat" : "dihasilkan"}!
                     </span>
                   </div>
                   <p className="text-green-700 mt-1 text-sm sm:text-base">
-                    Topik: {selectedTopic} | Kesulitan: {DIFFICULTIES.find(d => d.value === selectedDifficulty)?.label} | Waktu: 30 menit
+                    Topik: {selectedTopic} | Kesulitan:{" "}
+                    {
+                      DIFFICULTIES.find((d) => d.value === selectedDifficulty)
+                        ?.label
+                    }{" "}
+                    | Waktu: 30 menit
                   </p>
                 </div>
                 <div className="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-4 justify-center">
@@ -647,79 +758,451 @@ export default function QuizPage() {
     );
   }
 
-  if (quizCompleted) {
+  if (quizCompleted || isCompletingQuiz) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-green-50">
-        <div className="container mx-auto px-4 py-8 sm:py-16">
-          <div className="max-w-2xl mx-auto text-center">
-            <div
-              className={`w-16 h-16 sm:w-20 sm:h-20 rounded-full flex items-center justify-center mx-auto mb-6 ${
-                score >= 80
-                  ? "bg-green-500"
-                  : score >= 60
-                  ? "bg-yellow-500"
-                  : "bg-red-500"
-              }`}
-            >
-              {score >= 80 ? (
-                <CheckCircle className="w-8 h-8 sm:w-10 sm:h-10 text-white" />
-              ) : (
-                <XCircle className="w-8 h-8 sm:w-10 sm:h-10 text-white" />
+        <div className="container mx-auto px-4 py-8">
+          <div className="max-w-4xl mx-auto">
+            {/* Header */}
+            <div className="text-center mb-8">
+              <div
+                className={`w-16 h-16 sm:w-20 sm:h-20 rounded-full flex items-center justify-center mx-auto mb-6 ${
+                  score >= 80
+                    ? "bg-green-500"
+                    : score >= 60
+                    ? "bg-yellow-500"
+                    : "bg-red-500"
+                }`}
+              >
+                {score >= 80 ? (
+                  <CheckCircle className="w-8 h-8 sm:w-10 sm:h-10 text-white" />
+                ) : (
+                  <XCircle className="w-8 h-8 sm:w-10 sm:h-10 text-white" />
+                )}
+              </div>
+
+              <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900 mb-4">
+                Kuis Selesai!
+              </h1>
+
+              {(isEvaluating || (isCompletingQuiz && !quizCompleted)) && (
+                <Card className="mb-6">
+                  <CardContent className="p-6">
+                    <div className="flex items-center justify-center space-x-3 mb-4">
+                      <RefreshCw className="w-6 h-6 animate-spin text-blue-600" />
+                      <span className="text-blue-800 font-semibold text-lg">
+                        AI sedang mengevaluasi jawaban Anda...
+                      </span>
+                    </div>
+                    <div className="text-center text-gray-600">
+                      Mohon tunggu sebentar, proses ini biasanya memakan waktu
+                      beberapa detik
+                    </div>
+                    <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <div className="text-sm text-blue-700 text-center">
+                        💡 AI sedang menganalisis setiap jawaban Anda untuk
+                        memberikan feedback yang akurat dan personal
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
               )}
             </div>
 
-            <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900 mb-4">
-              Kuis Selesai!
-            </h1>
-
-            <Card className="mb-8">
-              <CardContent className="p-4 sm:p-6 md:p-8">
-                <div className="text-4xl sm:text-5xl md:text-6xl font-bold mb-4 bg-gradient-to-r from-blue-600 to-green-600 bg-clip-text text-transparent">
-                  {score}%
-                </div>
-                <p className="text-base sm:text-lg md:text-xl text-gray-600 mb-6">
-                  {score >= 80
-                    ? "Excellent! Anda siap menghadapi ujian!"
-                    : score >= 60
-                    ? "Good job! Terus berlatih untuk hasil yang lebih baik."
-                    : "Keep practicing! Anda bisa melakukan lebih baik lagi."}
-                </p>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">
-                  <div>
-                    <div className="text-xl sm:text-2xl font-bold text-blue-600 mb-1">
-                      {Math.round((score / 100) * questions.length)}/
-                      {questions.length}
+            {/* AI Evaluation Results */}
+            {quizEvaluation && (
+              <>
+                {/* Score Overview */}
+                <Card className="mb-6">
+                  <CardContent className="p-6">
+                    <div className="text-center mb-6">
+                      <div className="text-4xl sm:text-5xl md:text-6xl font-bold mb-4 bg-gradient-to-r from-blue-600 to-green-600 bg-clip-text text-transparent">
+                        {score}%
+                      </div>
+                      {quizEvaluation && (
+                        <p className="text-lg text-gray-600 mb-4">
+                          {quizEvaluation.motivationalMessage}
+                        </p>
+                      )}
                     </div>
-                    <div className="text-sm sm:text-base text-gray-600">Benar</div>
-                  </div>
-                  <div>
-                    <div className="text-xl sm:text-2xl font-bold text-green-600 mb-1">
-                      +{score * 10}
-                    </div>
-                    <div className="text-sm sm:text-base text-gray-600">XP Earned</div>
-                  </div>
-                  <div>
-                    <div className="text-xl sm:text-2xl font-bold text-purple-600 mb-1">
-                      {formatTime(1800 - timeLeft)}
-                    </div>
-                    <div className="text-sm sm:text-base text-gray-600">Waktu</div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
 
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">
+                      <div>
+                        <div className="text-xl sm:text-2xl font-bold text-blue-600 mb-1">
+                          {
+                            answerEvaluations.filter(
+                              (evaluation) => evaluation.isCorrect
+                            ).length
+                          }
+                          /{questions.length}
+                        </div>
+                        <div className="text-sm sm:text-base text-gray-600">
+                          Benar
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xl sm:text-2xl font-bold text-green-600 mb-1">
+                          +{score * 10}
+                        </div>
+                        <div className="text-sm sm:text-base text-gray-600">
+                          XP Earned
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xl sm:text-2xl font-bold text-purple-600 mb-1">
+                          {formatTime(1800 - timeLeft)}
+                        </div>
+                        <div className="text-sm sm:text-base text-gray-600">
+                          Waktu
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+                {/* Performance Analysis */}
+                <Card className="mb-6">
+                  <CardHeader>
+                    <CardTitle className="flex items-center space-x-2">
+                      <Brain className="w-5 h-5 text-blue-600" />
+                      <span>Analisis Performa AI</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    {/* Strengths and Weaknesses */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div>
+                        <h4 className="font-semibold text-green-800 mb-3 flex items-center">
+                          <CheckCircle className="w-4 h-4 mr-2" />
+                          Kekuatan Anda
+                        </h4>
+                        <ul className="space-y-2">
+                          {quizEvaluation.strengths.map(
+                            (strength: string, index: number) => (
+                              <li
+                                key={index}
+                                className="text-sm text-green-700 flex items-start"
+                              >
+                                <span className="w-2 h-2 bg-green-500 rounded-full mt-2 mr-2 flex-shrink-0"></span>
+                                {strength}
+                              </li>
+                            )
+                          )}
+                        </ul>
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-red-800 mb-3 flex items-center">
+                          <Target className="w-4 h-4 mr-2" />
+                          Area Perbaikan
+                        </h4>
+                        <ul className="space-y-2">
+                          {quizEvaluation.weaknesses.map(
+                            (weakness: string, index: number) => (
+                              <li
+                                key={index}
+                                className="text-sm text-red-700 flex items-start"
+                              >
+                                <span className="w-2 h-2 bg-red-500 rounded-full mt-2 mr-2 flex-shrink-0"></span>
+                                {weakness}
+                              </li>
+                            )
+                          )}
+                        </ul>
+                      </div>
+                    </div>
+
+                    {/* Performance by Category */}
+                    <div>
+                      <h4 className="font-semibold text-gray-800 mb-4">
+                        Performa per Kategori
+                      </h4>
+                      <div className="space-y-3">
+                        {quizEvaluation.performance.excellent.length > 0 && (
+                          <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                            <h5 className="font-medium text-green-800 mb-2">
+                              Excellent (90-100%)
+                            </h5>
+                            <div className="flex flex-wrap gap-2">
+                              {quizEvaluation.performance.excellent.map(
+                                (topic: string, index: number) => (
+                                  <Badge
+                                    key={index}
+                                    className="bg-green-100 text-green-800"
+                                  >
+                                    {topic}
+                                  </Badge>
+                                )
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        {quizEvaluation.performance.good.length > 0 && (
+                          <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                            <h5 className="font-medium text-yellow-800 mb-2">
+                              Good (70-89%)
+                            </h5>
+                            <div className="flex flex-wrap gap-2">
+                              {quizEvaluation.performance.good.map(
+                                (topic: string, index: number) => (
+                                  <Badge
+                                    key={index}
+                                    className="bg-yellow-100 text-yellow-800"
+                                  >
+                                    {topic}
+                                  </Badge>
+                                )
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        {quizEvaluation.performance.needsImprovement.length >
+                          0 && (
+                          <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                            <h5 className="font-medium text-red-800 mb-2">
+                              Needs Improvement (&lt;70%)
+                            </h5>
+                            <div className="flex flex-wrap gap-2">
+                              {quizEvaluation.performance.needsImprovement.map(
+                                (topic: string, index: number) => (
+                                  <Badge
+                                    key={index}
+                                    className="bg-red-100 text-red-800"
+                                  >
+                                    {topic}
+                                  </Badge>
+                                )
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Learning Recommendations */}
+                <Card className="mb-6">
+                  <CardHeader>
+                    <CardTitle className="flex items-center space-x-2">
+                      <Lightbulb className="w-5 h-5 text-yellow-600" />
+                      <span>Rekomendasi Pembelajaran</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    <div>
+                      <h4 className="font-semibold text-gray-800 mb-3">
+                        Topik Prioritas
+                      </h4>
+                      <div className="flex flex-wrap gap-2">
+                        {quizEvaluation.learningRecommendations.priorityTopics.map(
+                          (topic: string, index: number) => (
+                            <Badge
+                              key={index}
+                              variant="outline"
+                              className="border-blue-300 text-blue-700"
+                            >
+                              {topic}
+                            </Badge>
+                          )
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <h4 className="font-semibold text-gray-800 mb-3">
+                        Rencana Belajar
+                      </h4>
+                      <ul className="space-y-2">
+                        {quizEvaluation.learningRecommendations.studyPlan.map(
+                          (step: string, index: number) => (
+                            <li
+                              key={index}
+                              className="text-sm text-gray-700 flex items-start"
+                            >
+                              <span className="bg-blue-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0">
+                                {index + 1}
+                              </span>
+                              {step}
+                            </li>
+                          )
+                        )}
+                      </ul>
+                    </div>
+
+                    <div>
+                      <h4 className="font-semibold text-gray-800 mb-3">
+                        Sumber Belajar
+                      </h4>
+                      <ul className="space-y-2">
+                        {quizEvaluation.learningRecommendations.resources.map(
+                          (resource: string, index: number) => (
+                            <li
+                              key={index}
+                              className="text-sm text-gray-700 flex items-start"
+                            >
+                              <span className="w-2 h-2 bg-blue-500 rounded-full mt-2 mr-2 flex-shrink-0"></span>
+                              {resource}
+                            </li>
+                          )
+                        )}
+                      </ul>
+                    </div>
+
+                    <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                      <h4 className="font-semibold text-blue-900 mb-2">
+                        Langkah Selanjutnya
+                      </h4>
+                      <p className="text-blue-800">
+                        {quizEvaluation.nextSteps}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              </>
+            )}
+
+            {/* Detailed Answer Review */}
+            {answerEvaluations.length > 0 && (
+              <Card className="mb-6">
+                <CardHeader>
+                  <CardTitle className="flex items-center space-x-2">
+                    <Zap className="w-5 h-5 text-purple-600" />
+                    <span>Review Jawaban Detail</span>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    {questions.map((question, index) => {
+                      const evaluation = answerEvaluations[index];
+                      if (!evaluation) return null;
+
+                      return (
+                        <div
+                          key={index}
+                          className={`p-4 border rounded-lg ${
+                            evaluation.isCorrect
+                              ? "border-green-200 bg-green-50"
+                              : "border-red-200 bg-red-50"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between mb-2">
+                            <h5 className="font-medium text-gray-900 flex-1">
+                              {index + 1}. {question.question}
+                            </h5>
+                            <div className="flex items-center space-x-2 ml-4">
+                              <Badge
+                                className={
+                                  evaluation.isCorrect
+                                    ? "bg-green-100 text-green-800"
+                                    : "bg-red-100 text-red-800"
+                                }
+                              >
+                                {evaluation.score}/100
+                              </Badge>
+                              {evaluation.isCorrect ? (
+                                <CheckCircle className="w-5 h-5 text-green-600" />
+                              ) : (
+                                <XCircle className="w-5 h-5 text-red-600" />
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="space-y-2 text-sm">
+                            <div>
+                              <span className="font-medium text-gray-700">
+                                Jawaban Anda:{" "}
+                              </span>
+                              <span className="text-gray-600">
+                                {(() => {
+                                  const userAnswer = userAnswers[index];
+                                  if (!userAnswer && userAnswer !== 0)
+                                    return "Tidak dijawab";
+
+                                  if (
+                                    question.type === "multiple-choice" &&
+                                    question.options
+                                  ) {
+                                    const answerIndex = parseInt(
+                                      userAnswer.toString()
+                                    );
+                                    return answerIndex >= 0 &&
+                                      answerIndex < question.options.length
+                                      ? question.options[answerIndex]
+                                      : userAnswer.toString();
+                                  }
+
+                                  return userAnswer.toString();
+                                })()}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="font-medium text-gray-700">
+                                Jawaban Benar:{" "}
+                              </span>
+                              <span className="text-gray-600">
+                                {question.correctAnswer.toString()}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="font-medium text-gray-700">
+                                Feedback AI:{" "}
+                              </span>
+                              <span className="text-gray-600">
+                                {evaluation.feedback}
+                              </span>
+                            </div>
+                            {evaluation.keyPoints &&
+                              evaluation.keyPoints.length > 0 && (
+                                <div>
+                                  <span className="font-medium text-gray-700">
+                                    Poin Kunci:{" "}
+                                  </span>
+                                  <ul className="list-disc list-inside text-gray-600 ml-4">
+                                    {evaluation.keyPoints.map(
+                                      (point: string, pointIndex: number) => (
+                                        <li key={pointIndex}>{point}</li>
+                                      )
+                                    )}
+                                  </ul>
+                                </div>
+                              )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Action Buttons */}
             <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center">
               <Button
                 size="lg"
                 onClick={() => window.location.reload()}
+                disabled={isEvaluating || isCompletingQuiz}
                 className="bg-gradient-to-r from-blue-600 to-green-600 w-full sm:w-auto"
               >
                 <RefreshCw className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
                 Coba Lagi
               </Button>
+              <Link href="/reading-materials">
+                <Button
+                  size="lg"
+                  variant="outline"
+                  disabled={isEvaluating || isCompletingQuiz}
+                  className="w-full sm:w-auto"
+                >
+                  <Brain className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
+                  Baca Materi
+                </Button>
+              </Link>
               <Link href="/dashboard">
-                <Button size="lg" variant="outline" className="w-full sm:w-auto">
+                <Button
+                  size="lg"
+                  variant="outline"
+                  disabled={isEvaluating || isCompletingQuiz}
+                  className="w-full sm:w-auto"
+                >
                   Kembali ke Dashboard
                 </Button>
               </Link>
@@ -762,7 +1245,9 @@ export default function QuizPage() {
             <div className="flex items-center space-x-2 sm:space-x-4">
               <div className="flex items-center space-x-1 sm:space-x-2 text-gray-600">
                 <Clock className="w-3 h-3 sm:w-4 sm:h-4" />
-                <span className="font-mono text-xs sm:text-sm">{formatTime(timeLeft)}</span>
+                <span className="font-mono text-xs sm:text-sm">
+                  {formatTime(timeLeft)}
+                </span>
               </div>
             </div>
           </div>
@@ -777,13 +1262,18 @@ export default function QuizPage() {
           <Card className="mb-6">
             <CardHeader>
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-3 sm:space-y-0">
-                <Badge variant="secondary" className="self-start text-xs sm:text-sm">{currentQ.topic}</Badge>
+                <Badge
+                  variant="secondary"
+                  className="self-start text-xs sm:text-sm"
+                >
+                  {currentQ.topic}
+                </Badge>
                 <div className="flex flex-wrap gap-2">
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={getAIHint}
-                    disabled={getHintMutation.isPending}
+                    disabled={getHintMutation.isPending || isCompletingQuiz}
                     className="text-xs sm:text-sm"
                   >
                     <HelpCircle className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
@@ -798,12 +1288,22 @@ export default function QuizPage() {
                     variant="outline"
                     size="sm"
                     onClick={generateNewQuestion}
-                    disabled={regenerateQuestionMutation.isPending}
+                    disabled={
+                      regenerateQuestionMutation.isPending || isCompletingQuiz
+                    }
                     className="text-xs sm:text-sm"
                   >
-                    <RefreshCw className={`w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2 ${regenerateQuestionMutation.isPending ? 'animate-spin' : ''}`} />
+                    <RefreshCw
+                      className={`w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2 ${
+                        regenerateQuestionMutation.isPending
+                          ? "animate-spin"
+                          : ""
+                      }`}
+                    />
                     <span className="hidden sm:inline">
-                      {regenerateQuestionMutation.isPending ? "Meregenerasi..." : "Regenerasi"}
+                      {regenerateQuestionMutation.isPending
+                        ? "Meregenerasi..."
+                        : "Regenerasi"}
                     </span>
                     <span className="sm:hidden">
                       {regenerateQuestionMutation.isPending ? "..." : "Regen"}
@@ -900,12 +1400,16 @@ export default function QuizPage() {
                 <div className="mt-6">
                   <Button
                     onClick={getAIExplanation}
-                    disabled={getExplanationMutation.isPending}
+                    disabled={
+                      getExplanationMutation.isPending || isCompletingQuiz
+                    }
                     variant="outline"
                     className="mb-4 bg-transparent"
                   >
                     <Brain className="w-4 h-4 mr-2" />
-                    {getExplanationMutation.isPending ? "Memuat Penjelasan..." : "Minta Penjelasan AI"}
+                    {getExplanationMutation.isPending
+                      ? "Memuat Penjelasan..."
+                      : "Minta Penjelasan AI"}
                   </Button>
 
                   {showExplanation && (
@@ -926,7 +1430,7 @@ export default function QuizPage() {
             <Button
               variant="outline"
               onClick={handlePrevQuestion}
-              disabled={currentQuestion === 0}
+              disabled={currentQuestion === 0 || isCompletingQuiz}
               className="w-full sm:w-auto order-2 sm:order-1"
             >
               <ArrowLeft className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
@@ -939,7 +1443,11 @@ export default function QuizPage() {
 
             <Button
               onClick={handleNextQuestion}
-              disabled={!selectedAnswer && !shortAnswer}
+              disabled={
+                (!selectedAnswer && !shortAnswer) ||
+                isEvaluating ||
+                isCompletingQuiz
+              }
               className="bg-gradient-to-r from-blue-600 to-green-600 w-full sm:w-auto order-3"
             >
               <span className="text-sm sm:text-base">

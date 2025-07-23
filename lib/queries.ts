@@ -90,6 +90,40 @@ const api = {
     return response.json();
   },
 
+  async evaluateAnswer(data: { 
+    question: string; 
+    userAnswer: string; 
+    correctAnswer: string; 
+    topic: string; 
+    questionType: string 
+  }): Promise<any> {
+    const response = await fetch('/api/evaluate-answer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) throw new Error('Failed to evaluate answer');
+    return response.json();
+  },
+
+  async evaluateQuiz(data: {
+    questions: any[];
+    userAnswers: (string | number)[];
+    evaluations: any[];
+    topic: string;
+    difficulty: string;
+    timeSpent: number;
+    totalQuestions: number;
+  }): Promise<any> {
+    const response = await fetch('/api/evaluate-quiz', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) throw new Error('Failed to evaluate quiz');
+    return response.json();
+  },
+
   async generateReadingMaterial(params: GenerateReadingMaterialRequest): Promise<{ readingMaterial: ReadingMaterial }> {
     const response = await fetch('/api/generate-reading-material', {
       method: 'POST',
@@ -473,5 +507,18 @@ export function useQuestionCount(topic?: string) {
     queryKey: ['questions', 'count', topic],
     queryFn: () => topic ? dbHelpers.getQuestionCount(topic) : Promise.resolve(0),
     staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+}
+
+// AI Evaluation hooks
+export function useEvaluateAnswer() {
+  return useMutation({
+    mutationFn: api.evaluateAnswer,
+  });
+}
+
+export function useEvaluateQuiz() {
+  return useMutation({
+    mutationFn: api.evaluateQuiz,
   });
 }

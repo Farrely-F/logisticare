@@ -1,70 +1,93 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { BookOpen, Plus, Bookmark, BookmarkCheck, Trash2, Clock, Calendar } from 'lucide-react';
-import { MarkdownRenderer } from '@/components/markdown-renderer';
-import { 
-  useGenerateReadingMaterial, 
-  useAllReadingMaterials, 
+import { useState } from "react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  BookOpen,
+  Plus,
+  Bookmark,
+  BookmarkCheck,
+  Trash2,
+  Clock,
+  Calendar,
+} from "lucide-react";
+import { MarkdownRenderer } from "@/components/markdown-renderer";
+import {
+  useGenerateReadingMaterial,
+  useAllReadingMaterials,
   useBookmarkedReadingMaterials,
   useUpdateReadingMaterialLastRead,
   useToggleReadingMaterialBookmark,
-  useDeleteReadingMaterial
-} from '@/lib/queries';
-import { ReadingMaterial } from '@/lib/db';
-import { toast } from 'sonner';
+  useDeleteReadingMaterial,
+} from "@/lib/queries";
+import { ReadingMaterial } from "@/lib/db";
+import { toast } from "sonner";
 
 const TOPICS = [
-  'Manajemen Logistik Rumah Sakit',
-  'Sistem Informasi Kesehatan',
-  'Manajemen Persediaan Medis',
-  'Distribusi Obat dan Alkes',
-  'Keselamatan Pasien',
-  'Manajemen Kualitas',
-  'Regulasi Kesehatan',
-  'Farmasi Rumah Sakit'
+  "Manajemen Logistik Rumah Sakit",
+  "Sistem Informasi Kesehatan",
+  "Manajemen Persediaan Medis",
+  "Distribusi Obat dan Alkes",
+  "Keselamatan Pasien",
+  "Manajemen Kualitas",
+  "Regulasi Kesehatan",
+  "Farmasi Rumah Sakit",
 ];
 
 const DIFFICULTIES = [
-  { value: 'beginner', label: 'Pemula' },
-  { value: 'intermediate', label: 'Menengah' },
-  { value: 'advanced', label: 'Lanjutan' }
+  { value: "beginner", label: "Pemula" },
+  { value: "intermediate", label: "Menengah" },
+  { value: "advanced", label: "Lanjutan" },
 ];
 
 export default function ReadingMaterialsPage() {
-  const [selectedTopic, setSelectedTopic] = useState('');
-  const [selectedDifficulty, setSelectedDifficulty] = useState('');
-  const [selectedMaterial, setSelectedMaterial] = useState<ReadingMaterial | null>(null);
+  const [selectedTopic, setSelectedTopic] = useState("");
+  const [selectedDifficulty, setSelectedDifficulty] = useState("");
+  const [selectedMaterial, setSelectedMaterial] =
+    useState<ReadingMaterial | null>(null);
 
   const generateMutation = useGenerateReadingMaterial();
-  const { data: allMaterials = [], refetch: refetchAll } = useAllReadingMaterials();
-  const { data: bookmarkedMaterials = [], refetch: refetchBookmarked } = useBookmarkedReadingMaterials();
+  const { data: allMaterials = [], refetch: refetchAll } =
+    useAllReadingMaterials();
+  const { data: bookmarkedMaterials = [], refetch: refetchBookmarked } =
+    useBookmarkedReadingMaterials();
   const updateLastReadMutation = useUpdateReadingMaterialLastRead();
   const toggleBookmarkMutation = useToggleReadingMaterialBookmark();
   const deleteMutation = useDeleteReadingMaterial();
 
   const handleGenerate = async () => {
     if (!selectedTopic || !selectedDifficulty) {
-      toast.error('Pilih topik dan tingkat kesulitan terlebih dahulu');
+      toast.error("Pilih topik dan tingkat kesulitan terlebih dahulu");
       return;
     }
 
     try {
       await generateMutation.mutateAsync({
         topic: selectedTopic,
-        difficulty: selectedDifficulty
+        difficulty: selectedDifficulty,
       });
-      toast.success('Materi bacaan berhasil dibuat!');
+      toast.success("Materi bacaan berhasil dibuat!");
       refetchAll();
     } catch (error) {
-      toast.error('Gagal membuat materi bacaan');
+      toast.error("Gagal membuat materi bacaan");
     }
   };
 
@@ -80,37 +103,37 @@ export default function ReadingMaterialsPage() {
   const handleToggleBookmark = async (materialId: number) => {
     try {
       await toggleBookmarkMutation.mutateAsync(materialId);
-      toast.success('Bookmark berhasil diubah');
+      toast.success("Bookmark berhasil diubah");
       refetchAll();
       refetchBookmarked();
     } catch (error) {
-      toast.error('Gagal mengubah bookmark');
+      toast.error("Gagal mengubah bookmark");
     }
   };
 
   const handleDelete = async (materialId: number) => {
-    if (confirm('Apakah Anda yakin ingin menghapus materi ini?')) {
+    if (confirm("Apakah Anda yakin ingin menghapus materi ini?")) {
       try {
         await deleteMutation.mutateAsync(materialId);
-        toast.success('Materi berhasil dihapus');
+        toast.success("Materi berhasil dihapus");
         refetchAll();
         refetchBookmarked();
         if (selectedMaterial?.id === materialId) {
           setSelectedMaterial(null);
         }
       } catch (error) {
-        toast.error('Gagal menghapus materi');
+        toast.error("Gagal menghapus materi");
       }
     }
   };
 
   const formatDate = (date: Date) => {
-    return new Intl.DateTimeFormat('id-ID', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
+    return new Intl.DateTimeFormat("id-ID", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
     }).format(new Date(date));
   };
 
@@ -119,9 +142,13 @@ export default function ReadingMaterialsPage() {
       <CardHeader className="pb-3">
         <div className="flex justify-between items-start">
           <div className="flex-1">
-            <CardTitle className="text-lg line-clamp-2">{material.title}</CardTitle>
-            <CardDescription className="mt-1">
-              <Badge variant="outline" className="mr-2">{material.topic}</Badge>
+            <CardTitle className="text-lg line-clamp-2">
+              {material.title}
+            </CardTitle>
+            <CardDescription className="mt-1 flex flex-wrap gap-2">
+              <Badge variant="outline" className="mr-2">
+                {material.topic.substring(0, 10)}...
+              </Badge>
               <Badge variant="secondary">{material.difficulty}</Badge>
             </CardDescription>
           </div>
@@ -154,10 +181,14 @@ export default function ReadingMaterialsPage() {
         </div>
       </CardHeader>
       <CardContent>
-        <p className="text-sm text-muted-foreground line-clamp-3 mb-3">
+        {/* <p className="text-sm text-muted-foreground line-clamp-3 mb-3">
           {material.content.substring(0, 200)}...
-        </p>
-        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+        </p> */}
+        <MarkdownRenderer
+          content={material.content.substring(0, 200) + "..."}
+          className="[&_*]:text-sm"
+        />
+        <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
           <div className="flex items-center gap-1">
             <Calendar className="h-3 w-3" />
             {formatDate(material.createdAt)}
@@ -169,8 +200,8 @@ export default function ReadingMaterialsPage() {
             </div>
           )}
         </div>
-        <Button 
-          className="w-full mt-3" 
+        <Button
+          className="w-full mt-3"
           onClick={() => handleReadMaterial(material)}
         >
           <BookOpen className="h-4 w-4 mr-2" />
@@ -184,8 +215,8 @@ export default function ReadingMaterialsPage() {
     return (
       <div className="container mx-auto p-6 max-w-4xl">
         <div className="mb-6">
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             onClick={() => setSelectedMaterial(null)}
             className="mb-4"
           >
@@ -193,7 +224,9 @@ export default function ReadingMaterialsPage() {
           </Button>
           <div className="flex justify-between items-start mb-4">
             <div>
-              <h1 className="text-3xl font-bold mb-2">{selectedMaterial.title}</h1>
+              <h1 className="text-3xl font-bold mb-2">
+                {selectedMaterial.title}
+              </h1>
               <div className="flex gap-2 mb-2">
                 <Badge variant="outline">{selectedMaterial.topic}</Badge>
                 <Badge variant="secondary">{selectedMaterial.difficulty}</Badge>
@@ -205,7 +238,8 @@ export default function ReadingMaterialsPage() {
             <Button
               variant="ghost"
               onClick={() => {
-                if (selectedMaterial.id) handleToggleBookmark(selectedMaterial.id);
+                if (selectedMaterial.id)
+                  handleToggleBookmark(selectedMaterial.id);
               }}
             >
               {selectedMaterial.bookmarked ? (
@@ -216,7 +250,7 @@ export default function ReadingMaterialsPage() {
             </Button>
           </div>
         </div>
-        
+
         <Card>
           <CardContent className="p-6">
             <MarkdownRenderer content={selectedMaterial.content} />
@@ -242,7 +276,8 @@ export default function ReadingMaterialsPage() {
             Buat Materi Bacaan Baru
           </CardTitle>
           <CardDescription>
-            Pilih topik dan tingkat kesulitan untuk membuat materi bacaan yang sesuai
+            Pilih topik dan tingkat kesulitan untuk membuat materi bacaan yang
+            sesuai
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -264,7 +299,10 @@ export default function ReadingMaterialsPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="difficulty">Tingkat Kesulitan</Label>
-              <Select value={selectedDifficulty} onValueChange={setSelectedDifficulty}>
+              <Select
+                value={selectedDifficulty}
+                onValueChange={setSelectedDifficulty}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Pilih tingkat kesulitan" />
                 </SelectTrigger>
@@ -278,30 +316,43 @@ export default function ReadingMaterialsPage() {
               </Select>
             </div>
           </div>
-          <Button 
-            onClick={handleGenerate} 
-            disabled={generateMutation.isPending || !selectedTopic || !selectedDifficulty}
+          <Button
+            onClick={handleGenerate}
+            disabled={
+              generateMutation.isPending ||
+              !selectedTopic ||
+              !selectedDifficulty
+            }
             className="w-full"
           >
-            {generateMutation.isPending ? 'Membuat Materi...' : 'Buat Materi Bacaan'}
+            {generateMutation.isPending
+              ? "Membuat Materi..."
+              : "Buat Materi Bacaan"}
           </Button>
         </CardContent>
       </Card>
 
       <Tabs defaultValue="all" className="w-full">
         <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="all">Semua Materi ({allMaterials.length})</TabsTrigger>
-          <TabsTrigger value="bookmarked">Tersimpan ({bookmarkedMaterials.length})</TabsTrigger>
+          <TabsTrigger value="all">
+            Semua Materi ({allMaterials.length})
+          </TabsTrigger>
+          <TabsTrigger value="bookmarked">
+            Tersimpan ({bookmarkedMaterials.length})
+          </TabsTrigger>
         </TabsList>
-        
+
         <TabsContent value="all" className="space-y-4">
           {allMaterials.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-12">
                 <BookOpen className="h-12 w-12 text-muted-foreground mb-4" />
-                <h3 className="text-lg font-semibold mb-2">Belum ada materi bacaan</h3>
+                <h3 className="text-lg font-semibold mb-2">
+                  Belum ada materi bacaan
+                </h3>
                 <p className="text-muted-foreground text-center">
-                  Buat materi bacaan pertama Anda dengan memilih topik dan tingkat kesulitan di atas
+                  Buat materi bacaan pertama Anda dengan memilih topik dan
+                  tingkat kesulitan di atas
                 </p>
               </CardContent>
             </Card>
@@ -313,15 +364,18 @@ export default function ReadingMaterialsPage() {
             </div>
           )}
         </TabsContent>
-        
+
         <TabsContent value="bookmarked" className="space-y-4">
           {bookmarkedMaterials.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-12">
                 <Bookmark className="h-12 w-12 text-muted-foreground mb-4" />
-                <h3 className="text-lg font-semibold mb-2">Belum ada materi tersimpan</h3>
+                <h3 className="text-lg font-semibold mb-2">
+                  Belum ada materi tersimpan
+                </h3>
                 <p className="text-muted-foreground text-center">
-                  Simpan materi bacaan favorit Anda dengan mengklik ikon bookmark
+                  Simpan materi bacaan favorit Anda dengan mengklik ikon
+                  bookmark
                 </p>
               </CardContent>
             </Card>
