@@ -50,6 +50,7 @@ import {
   useDeleteQuizProgress,
   useEvaluateAnswer,
   useEvaluateQuiz,
+  useEvaluateQuizBatch,
 } from "@/lib/queries";
 import { Question } from "@/lib/db";
 import { toast } from "sonner";
@@ -110,6 +111,7 @@ export default function QuizPage() {
   const deleteQuizProgressMutation = useDeleteQuizProgress();
   const evaluateAnswerMutation = useEvaluateAnswer();
   const evaluateQuizMutation = useEvaluateQuiz();
+  const evaluateQuizBatchMutation = useEvaluateQuizBatch();
 
   const { data: existingQuestions = [] } = useRandomQuestionsByTopic(
     selectedTopic,
@@ -298,69 +300,37 @@ export default function QuizPage() {
     setIsEvaluating(true);
 
     try {
-      // Evaluate each answer using AI
-      const evaluations = [];
-
-      for (let i = 0; i < questions.length; i++) {
-        const question = questions[i];
-        const userAnswer = userAnswers[i];
-
-        // Convert user answer to proper format for AI evaluation
-        let formattedUserAnswer = "";
-        if (question.type === "multiple-choice" && question.options) {
-          // Convert index to actual option text
-          const answerIndex = parseInt(userAnswer?.toString() || "-1");
-          formattedUserAnswer =
-            answerIndex >= 0 && answerIndex < question.options.length
-              ? question.options[answerIndex]
-              : userAnswer?.toString() || "";
-        } else {
-          formattedUserAnswer = userAnswer?.toString() || "";
-        }
-
-        const evaluation = await evaluateAnswerMutation.mutateAsync({
-          question: question.question,
-          userAnswer: formattedUserAnswer,
-          correctAnswer: question.correctAnswer.toString(),
-          topic: question.topic,
-          questionType: question.type,
-        });
-
-        evaluations.push(evaluation.evaluation);
-      }
-
-      setAnswerEvaluations(evaluations);
-
-      // Calculate overall score from AI evaluations
-      const totalScore = evaluations.reduce(
-        (sum, evaluation) => sum + evaluation.score,
-        0
-      );
-      const finalScore = Math.round(totalScore / evaluations.length);
-      setScore(finalScore);
-
       // Calculate time spent
       const timeSpent = quizStartTime
         ? Math.floor((new Date().getTime() - quizStartTime.getTime()) / 1000)
         : 0;
 
-      // Get comprehensive quiz evaluation
-      const quizEval = await evaluateQuizMutation.mutateAsync({
+      // Use batch evaluation - evaluates all answers in a single API call
+      const batchResult = await evaluateQuizBatchMutation.mutateAsync({
         questions,
         userAnswers,
-        evaluations,
         topic: selectedTopic,
         difficulty: selectedDifficulty,
         timeSpent,
         totalQuestions: questions.length,
       });
 
-      setQuizEvaluation(quizEval.evaluation);
+      // Set the evaluations and quiz evaluation from batch result
+      setAnswerEvaluations(batchResult.answerEvaluations);
+      setQuizEvaluation(batchResult.quizEvaluation);
+
+      // Calculate overall score from AI evaluations
+      const totalScore = batchResult.answerEvaluations.reduce(
+        (sum: number, evaluation: any) => sum + evaluation.score,
+        0
+      );
+      const finalScore = Math.round(totalScore / batchResult.answerEvaluations.length);
+      setScore(finalScore);
       setQuizCompleted(true);
 
       // Count correct answers for progress tracking
-      const correctAnswers = evaluations.filter(
-        (evaluation) => evaluation.isCorrect
+      const correctAnswers = batchResult.answerEvaluations.filter(
+        (evaluation: any) => evaluation.isCorrect
       ).length;
 
       // Save quiz session with AI evaluations

@@ -124,6 +124,23 @@ const api = {
     return response.json();
   },
 
+  async evaluateQuizBatch(data: {
+    questions: any[];
+    userAnswers: (string | number)[];
+    topic: string;
+    difficulty: string;
+    timeSpent: number;
+    totalQuestions: number;
+  }): Promise<any> {
+    const response = await fetch('/api/evaluate-quiz-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) throw new Error('Failed to evaluate quiz batch');
+    return response.json();
+  },
+
   async generateReadingMaterial(params: GenerateReadingMaterialRequest): Promise<{ readingMaterial: ReadingMaterial }> {
     const response = await fetch('/api/generate-reading-material', {
       method: 'POST',
@@ -520,5 +537,11 @@ export function useEvaluateAnswer() {
 export function useEvaluateQuiz() {
   return useMutation({
     mutationFn: api.evaluateQuiz,
+  });
+}
+
+export function useEvaluateQuizBatch() {
+  return useMutation({
+    mutationFn: api.evaluateQuizBatch,
   });
 }
