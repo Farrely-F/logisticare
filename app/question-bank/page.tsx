@@ -24,19 +24,9 @@ import {
   FileText,
 } from "lucide-react"
 import Link from "next/link"
-
-interface Question {
-  id: number
-  type: "multiple-choice" | "true-false" | "short-answer"
-  topic: string
-  difficulty: "easy" | "medium" | "hard"
-  question: string
-  options?: string[]
-  correctAnswer: string | number
-  explanation: string
-  tags: string[]
-  bookmarked: boolean
-}
+import { useGenerateQuestions, useRegenerateQuestion } from "@/lib/queries"
+import { Question, dbHelpers } from "@/lib/db"
+import { toast } from "sonner"
 
 export default function QuestionBankPage() {
   const [searchTerm, setSearchTerm] = useState("")
@@ -44,86 +34,100 @@ export default function QuestionBankPage() {
   const [selectedDifficulty, setSelectedDifficulty] = useState("all")
   const [selectedType, setSelectedType] = useState("all")
   const [showAnswers, setShowAnswers] = useState<number[]>([])
-
   const [questions, setQuestions] = useState<Question[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [isGenerating, setIsGenerating] = useState(false)
+
+  // React Query hooks
+  const generateQuestionsMutation = useGenerateQuestions()
+  const regenerateQuestionMutation = useRegenerateQuestion()
 
   useEffect(() => {
     loadQuestions()
   }, [])
 
   const loadQuestions = async () => {
-    setIsLoading(true)
     try {
-      // Load questions for all topics
+      // First, try to load existing questions from database
       const topics = ["Manajemen Inventori", "Pengadaan Medis", "SOP Logistik", "Distribusi Obat"]
       const allQuestions: Question[] = []
 
+      // Load existing questions from database
       for (const topic of topics) {
-        const response = await fetch("/api/generate-questions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
+        const existingQuestions = await dbHelpers.getQuestionsByTopic(topic)
+        allQuestions.push(...existingQuestions)
+      }
+
+      // If no questions exist, generate new ones
+      if (allQuestions.length === 0) {
+        for (const topic of topics) {
+          const result = await generateQuestionsMutation.mutateAsync({
             topic: topic,
             count: 5,
             difficulty: "mixed",
-          }),
-        })
+          })
 
-        if (response.ok) {
-          const data = await response.json()
-          allQuestions.push(
-            ...data.questions.map((q: any, index: number) => ({
+          if (result.questions) {
+            // Don't assign IDs manually - let the database handle it
+            const questionsToSave = result.questions.map((q: any) => ({
               ...q,
-              id: allQuestions.length + index + 1,
-              bookmarked: Math.random() > 0.7, // Random bookmarks for demo
-            })),
-          )
+              topic: topic,
+              bookmarked: Math.random() > 0.7 ? 1 : 0, // Random bookmarks for demo
+              tags: q.tags || []
+            }))
+            
+            // Save to database and get the saved questions with auto-generated IDs
+            await dbHelpers.saveQuestions(questionsToSave)
+            
+            // Load the saved questions from database to get the correct IDs
+            const savedQuestions = await dbHelpers.getQuestionsByTopic(topic)
+            allQuestions.push(...savedQuestions)
+          }
         }
       }
 
       setQuestions(allQuestions)
+      toast.success("Soal berhasil dimuat!")
     } catch (error) {
       console.error("Error loading questions:", error)
-      // Fallback to empty array
+      toast.error("Gagal memuat soal")
       setQuestions([])
-    } finally {
-      setIsLoading(false)
     }
   }
 
   const generateMoreQuestions = async (topic: string) => {
-    setIsGenerating(true)
     try {
-      const response = await fetch("/api/generate-questions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          topic: topic,
-          count: 3,
-          difficulty: "mixed",
-        }),
+      const result = await generateQuestionsMutation.mutateAsync({
+        topic: topic,
+        count: 3,
+        difficulty: "mixed",
       })
 
-      if (response.ok) {
-        const data = await response.json()
-        const newQuestions = data.questions.map((q: any, index: number) => ({
+      if (result.questions) {
+        // Don't assign IDs manually - let the database handle it
+        const questionsToSave = result.questions.map((q: any) => ({
           ...q,
-          id: questions.length + index + 1,
-          bookmarked: false,
+          topic: topic,
+          bookmarked: 0,
+          tags: q.tags || []
         }))
-        setQuestions((prev) => [...prev, ...newQuestions])
+        
+        // Save to database
+        await dbHelpers.saveQuestions(questionsToSave)
+        
+        // Reload all questions from database to get the updated list with correct IDs
+        const topics = ["Manajemen Inventori", "Pengadaan Medis", "SOP Logistik", "Distribusi Obat"]
+        const allQuestions: Question[] = []
+        
+        for (const topicName of topics) {
+          const topicQuestions = await dbHelpers.getQuestionsByTopic(topicName)
+          allQuestions.push(...topicQuestions)
+        }
+        
+        setQuestions(allQuestions)
+        toast.success("Soal baru berhasil dihasilkan!")
       }
     } catch (error) {
       console.error("Error generating more questions:", error)
-      alert("Gagal menghasilkan soal baru. Silakan coba lagi.")
-    } finally {
-      setIsGenerating(false)
+      toast.error("Gagal menghasilkan soal baru")
     }
   }
 
@@ -138,7 +142,7 @@ export default function QuestionBankPage() {
   const filteredQuestions = questions.filter((question) => {
     const matchesSearch =
       question.question.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      question.tags.some((tag) => tag.toLowerCase().includes(searchTerm.toLowerCase()))
+      (question.tags || []).some((tag) => tag.toLowerCase().includes(searchTerm.toLowerCase()))
     const matchesTopic = selectedTopic === "all" || question.topic === selectedTopic
     const matchesDifficulty = selectedDifficulty === "all" || question.difficulty === selectedDifficulty
     const matchesType = selectedType === "all" || question.type === selectedType
@@ -146,7 +150,7 @@ export default function QuestionBankPage() {
     return matchesSearch && matchesTopic && matchesDifficulty && matchesType
   })
 
-  const bookmarkedQuestions = questions.filter((question) => question.bookmarked)
+  const bookmarkedQuestions = questions.filter((question) => question.bookmarked === 1)
 
   const toggleAnswer = (questionId: number) => {
     setShowAnswers((prev) =>
@@ -154,9 +158,22 @@ export default function QuestionBankPage() {
     )
   }
 
-  const toggleBookmark = (questionId: number) => {
-    // In a real app, this would update the backend
-    console.log(`Toggling bookmark for question ${questionId}`)
+  const toggleBookmark = async (questionId: number) => {
+    try {
+      await dbHelpers.toggleBookmark(questionId)
+      
+      // Update the local state
+      setQuestions(prev => prev.map(q => 
+        q.id === questionId 
+          ? { ...q, bookmarked: q.bookmarked === 1 ? 0 : 1 }
+          : q
+      ))
+      
+      toast.success("Bookmark berhasil diperbarui!")
+    } catch (error) {
+      console.error("Error toggling bookmark:", error)
+      toast.error("Gagal memperbarui bookmark")
+    }
   }
 
   const generateVariation = async (questionId: number) => {
@@ -164,36 +181,24 @@ export default function QuestionBankPage() {
     if (!question) return
 
     try {
-      const response = await fetch("/api/regenerate-question", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          originalQuestion: question.question,
-          topic: question.topic,
-          difficulty: question.difficulty,
-          type: question.type,
-        }),
+      const result = await regenerateQuestionMutation.mutateAsync({
+        originalQuestion: question.question,
+        topic: question.topic,
+        difficulty: question.difficulty,
+        type: question.type,
       })
-
-      if (!response.ok) {
-        throw new Error("Failed to regenerate question")
-      }
-
-      const data = await response.json()
       
       // Update the question in the list
       setQuestions(prev => prev.map(q => 
         q.id === questionId 
-          ? { ...data.question, id: questionId, bookmarked: q.bookmarked }
+          ? { ...result.question, id: questionId, bookmarked: q.bookmarked }
           : q
       ))
       
-      alert("Variasi soal berhasil dihasilkan! 🤖")
+      toast.success("Variasi soal berhasil dihasilkan! 🤖")
     } catch (error) {
       console.error("Error generating question variation:", error)
-      alert("Gagal menghasilkan variasi soal. Silakan coba lagi.")
+      toast.error("Gagal menghasilkan variasi soal")
     }
   }
 
@@ -327,11 +332,11 @@ export default function QuestionBankPage() {
             </p>
             <Button
               onClick={() => generateMoreQuestions(selectedTopic === "all" ? "Manajemen Inventori" : selectedTopic)}
-              disabled={isGenerating}
+              disabled={generateQuestionsMutation.isPending}
               variant="outline"
               className="w-full sm:w-auto text-xs sm:text-sm"
             >
-              {isGenerating ? (
+              {generateQuestionsMutation.isPending ? (
                 <>
                   <RefreshCw className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2 animate-spin" />
                   <span className="hidden sm:inline">Generating...</span>
@@ -348,7 +353,7 @@ export default function QuestionBankPage() {
           </div>
         </div>
 
-        {isLoading ? (
+        {generateQuestionsMutation.isPending && questions.length === 0 ? (
           <div className="text-center py-12">
             <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-4 text-blue-600" />
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Menghasilkan Bank Soal dengan AI</h3>
@@ -365,7 +370,7 @@ export default function QuestionBankPage() {
             <TabsContent value="all" className="space-y-3 sm:space-y-4">
               {filteredQuestions.map((question: Question) => {
                 const TypeIcon = getTypeIcon(question.type)
-                const isAnswerShown = showAnswers.includes(question.id)
+                const isAnswerShown = showAnswers.includes(question.id || 0)
 
                 return (
                   <Card key={question.id} className="hover:shadow-md transition-shadow">
@@ -383,13 +388,19 @@ export default function QuestionBankPage() {
                           </Badge>
                         </div>
                         <div className="flex space-x-1">
-                          <Button variant="ghost" size="sm" onClick={() => toggleBookmark(question.id)} className="p-1 sm:p-2">
+                          <Button variant="ghost" size="sm" onClick={() => question.id && toggleBookmark(question.id)} className="p-1 sm:p-2">
                             <Star
-                              className={`w-3 h-3 sm:w-4 sm:h-4 ${question.bookmarked ? "fill-yellow-400 text-yellow-400" : ""}`}
+                              className={`w-3 h-3 sm:w-4 sm:h-4 ${question.bookmarked === 1 ? "fill-yellow-400 text-yellow-400" : ""}`}
                             />
                           </Button>
-                          <Button variant="ghost" size="sm" onClick={() => generateVariation(question.id)} className="p-1 sm:p-2">
-                            <RefreshCw className="w-3 h-3 sm:w-4 sm:h-4" />
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            onClick={() => question.id && generateVariation(question.id)} 
+                            disabled={regenerateQuestionMutation.isPending}
+                            className="p-1 sm:p-2"
+                          >
+                            <RefreshCw className={`w-3 h-3 sm:w-4 sm:h-4 ${regenerateQuestionMutation.isPending ? 'animate-spin' : ''}`} />
                           </Button>
                         </div>
                       </div>
@@ -469,13 +480,13 @@ export default function QuestionBankPage() {
 
                       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                         <div className="flex flex-wrap gap-1">
-                          {question.tags.map((tag: string, index: number) => (
+                          {(question.tags || []).map((tag: string, index: number) => (
                             <Badge key={index} variant="secondary" className="text-xs">
                               {tag}
                             </Badge>
                           ))}
                         </div>
-                        <Button variant="outline" size="sm" onClick={() => toggleAnswer(question.id)} className="text-xs sm:text-sm w-full sm:w-auto">
+                        <Button variant="outline" size="sm" onClick={() => question.id && toggleAnswer(question.id)} className="text-xs sm:text-sm w-full sm:w-auto">
                           <span className="hidden sm:inline">{isAnswerShown ? "Sembunyikan" : "Lihat"} Jawaban</span>
                           <span className="sm:hidden">{isAnswerShown ? "Tutup" : "Jawaban"}</span>
                         </Button>
@@ -496,7 +507,7 @@ export default function QuestionBankPage() {
               ) : (
                 bookmarkedQuestions.map((question: Question) => {
                   const TypeIcon = getTypeIcon(question.type)
-                  const isAnswerShown = showAnswers.includes(question.id)
+                  const isAnswerShown = showAnswers.includes(question.id || 0)
 
                   return (
                     <Card key={question.id} className="hover:shadow-md transition-shadow">
@@ -514,11 +525,17 @@ export default function QuestionBankPage() {
                             </Badge>
                           </div>
                           <div className="flex space-x-1">
-                            <Button variant="ghost" size="sm" onClick={() => toggleBookmark(question.id)} className="p-1 sm:p-2">
+                            <Button variant="ghost" size="sm" onClick={() => question.id && toggleBookmark(question.id)} className="p-1 sm:p-2">
                               <Star className="w-3 h-3 sm:w-4 sm:h-4 fill-yellow-400 text-yellow-400" />
                             </Button>
-                            <Button variant="ghost" size="sm" onClick={() => generateVariation(question.id)} className="p-1 sm:p-2">
-                              <RefreshCw className="w-3 h-3 sm:w-4 sm:h-4" />
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              onClick={() => question.id && generateVariation(question.id)} 
+                              disabled={regenerateQuestionMutation.isPending}
+                              className="p-1 sm:p-2"
+                            >
+                              <RefreshCw className={`w-3 h-3 sm:w-4 sm:h-4 ${regenerateQuestionMutation.isPending ? 'animate-spin' : ''}`} />
                             </Button>
                           </div>
                         </div>
@@ -598,13 +615,13 @@ export default function QuestionBankPage() {
 
                         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                           <div className="flex flex-wrap gap-1">
-                            {question.tags.map((tag: string, index: number) => (
+                            {(question.tags || []).map((tag: string, index: number) => (
                               <Badge key={index} variant="secondary" className="text-xs">
                                 {tag}
                               </Badge>
                             ))}
                           </div>
-                          <Button variant="outline" size="sm" onClick={() => toggleAnswer(question.id)} className="text-xs sm:text-sm w-full sm:w-auto">
+                          <Button variant="outline" size="sm" onClick={() => question.id && toggleAnswer(question.id)} className="text-xs sm:text-sm w-full sm:w-auto">
                             <span className="hidden sm:inline">{isAnswerShown ? "Sembunyikan" : "Lihat"} Jawaban</span>
                             <span className="sm:hidden">{isAnswerShown ? "Tutup" : "Jawaban"}</span>
                           </Button>
@@ -663,7 +680,7 @@ export default function QuestionBankPage() {
                                 </div>
                               </div>
                               <div className="flex items-center space-x-1 sm:space-x-2 flex-shrink-0">
-                                {question.bookmarked && <Star className="w-3 h-3 sm:w-4 sm:h-4 fill-yellow-400 text-yellow-400" />}
+                                {question.bookmarked === 1 && <Star className="w-3 h-3 sm:w-4 sm:h-4 fill-yellow-400 text-yellow-400" />}
                                 <Button variant="ghost" size="sm" className="p-1 sm:p-2">
                                   <BookOpen className="w-3 h-3 sm:w-4 sm:h-4" />
                                 </Button>

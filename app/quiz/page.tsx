@@ -30,22 +30,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-
-interface Question {
-  id: number;
-  type: "multiple-choice" | "true-false" | "short-answer";
-  topic: string;
-  difficulty: "easy" | "medium" | "hard";
-  question: string;
-  options?: string[];
-  correctAnswer: string | number;
-  explanation: string;
-  aiHint: string;
-}
+import {
+  useGenerateQuestions,
+  useRegenerateQuestion,
+  useGetExplanation,
+  useGetHint,
+  useSaveQuizSession,
+  useUpdateProgress,
+} from "@/lib/queries";
+import { Question } from "@/lib/db";
+import { toast } from "sonner";
 
 export default function QuizPage() {
   const [questions, setQuestions] = useState<Question[]>([]);
-  const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false);
   const [selectedTopic, setSelectedTopic] = useState("Manajemen Inventori");
   const [questionCount, setQuestionCount] = useState(5);
   const [currentQuestion, setCurrentQuestion] = useState(0);
@@ -58,38 +55,30 @@ export default function QuizPage() {
   const [quizStarted, setQuizStarted] = useState(false);
   const [quizCompleted, setQuizCompleted] = useState(false);
   const [userAnswers, setUserAnswers] = useState<(string | number)[]>([]);
+  const [quizStartTime, setQuizStartTime] = useState<Date | null>(null);
+
+  // React Query hooks
+  const generateQuestionsMutation = useGenerateQuestions();
+  const regenerateQuestionMutation = useRegenerateQuestion();
+  const getExplanationMutation = useGetExplanation();
+  const getHintMutation = useGetHint();
+  const saveQuizSessionMutation = useSaveQuizSession();
+  const updateProgressMutation = useUpdateProgress();
 
   const generateQuestions = async () => {
-    setIsGeneratingQuestions(true);
     try {
-      const response = await fetch("/api/generate-questions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          topic: selectedTopic,
-          count: questionCount,
-          difficulty: "mixed",
-        }),
+      const result = await generateQuestionsMutation.mutateAsync({
+        topic: selectedTopic,
+        count: questionCount,
+        difficulty: "mixed",
       });
 
-      console.log(response);
-
-      if (!response.ok) {
-        throw new Error("Failed to generate questions");
-      }
-
-      const data = await response.json();
-
-      console.log(data);
-      setQuestions(data.questions);
-      setUserAnswers(new Array(data.questions.length).fill(""));
+      setQuestions(result.questions);
+      setUserAnswers(new Array(result.questions.length).fill(""));
+      toast.success("Soal berhasil dibuat!");
     } catch (error) {
       console.error("Error generating questions:", error);
-      alert("Gagal menghasilkan soal. Silakan coba lagi.");
-    } finally {
-      setIsGeneratingQuestions(false);
+      toast.error("Gagal menghasilkan soal. Silakan coba lagi.");
     }
   };
 
@@ -113,6 +102,7 @@ export default function QuizPage() {
 
   const handleStartQuiz = () => {
     setQuizStarted(true);
+    setQuizStartTime(new Date());
     setUserAnswers(new Array(questions.length).fill(""));
   };
 
@@ -149,7 +139,7 @@ export default function QuizPage() {
     }
   };
 
-  const handleQuizComplete = () => {
+  const handleQuizComplete = async () => {
     let correctAnswers = 0;
     questions.forEach((question, index) => {
       if (question.type === "short-answer") {
@@ -169,34 +159,56 @@ export default function QuizPage() {
         }
       }
     });
-    setScore(Math.round((correctAnswers / questions.length) * 100));
+    
+    const finalScore = Math.round((correctAnswers / questions.length) * 100);
+    setScore(finalScore);
     setQuizCompleted(true);
+
+    // Calculate time spent
+    const timeSpent = quizStartTime ? Math.floor((new Date().getTime() - quizStartTime.getTime()) / 1000) : 0;
+
+    try {
+      // Save quiz session
+      await saveQuizSessionMutation.mutateAsync({
+        topic: selectedTopic,
+        difficulty: "mixed",
+        questionCount: questions.length,
+        questions,
+        userAnswers,
+        score: finalScore,
+        timeSpent,
+        createdAt: new Date(),
+        completedAt: new Date(),
+      });
+
+      // Update user progress
+      await updateProgressMutation.mutateAsync({
+        topic: selectedTopic,
+        correct: correctAnswers,
+        total: questions.length,
+        timeSpent,
+      });
+
+      toast.success("Hasil kuis telah disimpan!");
+    } catch (error) {
+      console.error("Error saving quiz results:", error);
+      toast.error("Gagal menyimpan hasil kuis.");
+    }
   };
 
   const generateNewQuestion = async () => {
     if (currentQuestion >= 0 && currentQuestion < questions.length) {
       try {
-        const response = await fetch("/api/regenerate-question", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            originalQuestion: questions[currentQuestion].question,
-            topic: questions[currentQuestion].topic,
-            difficulty: questions[currentQuestion].difficulty,
-            type: questions[currentQuestion].type,
-          }),
+        const result = await regenerateQuestionMutation.mutateAsync({
+          originalQuestion: questions[currentQuestion].question,
+          topic: questions[currentQuestion].topic,
+          difficulty: questions[currentQuestion].difficulty,
+          type: questions[currentQuestion].type,
         });
 
-        if (!response.ok) {
-          throw new Error("Failed to regenerate question");
-        }
-
-        const data = await response.json();
         const newQuestions = [...questions];
         newQuestions[currentQuestion] = {
-          ...data.question,
+          ...result.question,
           id: questions[currentQuestion].id,
         };
         setQuestions(newQuestions);
@@ -206,9 +218,11 @@ export default function QuizPage() {
         setShortAnswer("");
         setShowExplanation(false);
         setShowHint(false);
+        
+        toast.success("Soal berhasil diregenerasi!");
       } catch (error) {
         console.error("Error regenerating question:", error);
-        alert("Gagal meregenerasi soal. Silakan coba lagi.");
+        toast.error("Gagal meregenerasi soal. Silakan coba lagi.");
       }
     }
   };
@@ -220,33 +234,51 @@ export default function QuizPage() {
           ? shortAnswer
           : selectedAnswer;
 
-      const response = await fetch("/api/get-explanation", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          question: questions[currentQuestion].question,
-          userAnswer: userAnswer,
-          correctAnswer: questions[currentQuestion].correctAnswer,
-          topic: questions[currentQuestion].topic,
-        }),
+      const result = await getExplanationMutation.mutateAsync({
+        question: questions[currentQuestion].question,
+        userAnswer,
+        correctAnswer: questions[currentQuestion].correctAnswer.toString(),
+        topic: questions[currentQuestion].topic,
+        questionId: questions[currentQuestion].id,
       });
 
-      if (!response.ok) {
-        throw new Error("Failed to get AI explanation");
-      }
-
-      const data = await response.json();
-
-      // Update the current question with AI explanation
+      // Update the question with the new explanation
       const newQuestions = [...questions];
-      newQuestions[currentQuestion].explanation = data.explanation;
+      newQuestions[currentQuestion] = {
+        ...newQuestions[currentQuestion],
+        explanation: result.explanation,
+      };
       setQuestions(newQuestions);
       setShowExplanation(true);
+      
+      toast.success("Penjelasan AI berhasil dimuat!");
     } catch (error) {
       console.error("Error getting AI explanation:", error);
-      setShowExplanation(true); // Show default explanation as fallback
+      toast.error("Gagal mendapatkan penjelasan AI.");
+    }
+  };
+
+  const getAIHint = async () => {
+    try {
+      const result = await getHintMutation.mutateAsync({
+        question: questions[currentQuestion].question,
+        topic: questions[currentQuestion].topic,
+        questionId: questions[currentQuestion].id,
+      });
+
+      // Update the question with the new hint
+      const newQuestions = [...questions];
+      newQuestions[currentQuestion] = {
+        ...newQuestions[currentQuestion],
+        aiHint: result.hint,
+      };
+      setQuestions(newQuestions);
+      setShowHint(true);
+      
+      toast.success("Petunjuk AI berhasil dimuat!");
+    } catch (error) {
+      console.error("Error getting AI hint:", error);
+      toast.error("Gagal mendapatkan petunjuk AI.");
     }
   };
 
@@ -350,10 +382,10 @@ export default function QuizPage() {
               <Button
                 size="lg"
                 onClick={generateQuestions}
-                disabled={isGeneratingQuestions}
+                disabled={generateQuestionsMutation.isPending}
                 className="bg-gradient-to-r from-blue-600 to-green-600 hover:from-blue-700 hover:to-green-700 text-sm sm:text-base md:text-lg px-6 sm:px-8 py-2 sm:py-3 w-full sm:w-auto"
               >
-                {isGeneratingQuestions ? (
+                {generateQuestionsMutation.isPending ? (
                   <>
                     <RefreshCw className="w-4 h-4 sm:w-5 sm:h-5 mr-2 animate-spin" />
                     <span className="hidden sm:inline">Menghasilkan Soal AI...</span>
@@ -545,22 +577,32 @@ export default function QuizPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setShowHint(!showHint)}
+                    onClick={getAIHint}
+                    disabled={getHintMutation.isPending}
                     className="text-xs sm:text-sm"
                   >
                     <HelpCircle className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
-                    <span className="hidden sm:inline">Petunjuk AI</span>
-                    <span className="sm:hidden">Petunjuk</span>
+                    <span className="hidden sm:inline">
+                      {getHintMutation.isPending ? "Memuat..." : "Petunjuk AI"}
+                    </span>
+                    <span className="sm:hidden">
+                      {getHintMutation.isPending ? "..." : "Petunjuk"}
+                    </span>
                   </Button>
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={generateNewQuestion}
+                    disabled={regenerateQuestionMutation.isPending}
                     className="text-xs sm:text-sm"
                   >
-                    <RefreshCw className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
-                    <span className="hidden sm:inline">Regenerasi</span>
-                    <span className="sm:hidden">Regen</span>
+                    <RefreshCw className={`w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2 ${regenerateQuestionMutation.isPending ? 'animate-spin' : ''}`} />
+                    <span className="hidden sm:inline">
+                      {regenerateQuestionMutation.isPending ? "Meregenerasi..." : "Regenerasi"}
+                    </span>
+                    <span className="sm:hidden">
+                      {regenerateQuestionMutation.isPending ? "..." : "Regen"}
+                    </span>
                   </Button>
                 </div>
               </div>
@@ -653,11 +695,12 @@ export default function QuizPage() {
                 <div className="mt-6">
                   <Button
                     onClick={getAIExplanation}
+                    disabled={getExplanationMutation.isPending}
                     variant="outline"
                     className="mb-4 bg-transparent"
                   >
                     <Brain className="w-4 h-4 mr-2" />
-                    Minta Penjelasan AI
+                    {getExplanationMutation.isPending ? "Memuat Penjelasan..." : "Minta Penjelasan AI"}
                   </Button>
 
                   {showExplanation && (
