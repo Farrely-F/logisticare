@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Clock,
   Brain,
@@ -21,6 +22,10 @@ import {
   Lightbulb,
   Target,
   Zap,
+  Play,
+  Pause,
+  Database,
+  Shuffle,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -37,13 +42,38 @@ import {
   useGetHint,
   useSaveQuizSession,
   useUpdateProgress,
+  useRandomQuestionsByTopic,
+  useQuestionCount,
+  useSaveQuizProgress,
+  useGetQuizProgress,
+  useUpdateQuizProgress,
+  useDeleteQuizProgress,
 } from "@/lib/queries";
 import { Question } from "@/lib/db";
 import { toast } from "sonner";
 
+const TOPICS = [
+  'Manajemen Logistik Rumah Sakit',
+  'Sistem Informasi Kesehatan',
+  'Manajemen Persediaan Medis',
+  'Distribusi Obat dan Alkes',
+  'Keselamatan Pasien',
+  'Manajemen Kualitas',
+  'Regulasi Kesehatan',
+  'Farmasi Rumah Sakit'
+];
+
+const DIFFICULTIES = [
+  { value: 'beginner', label: 'Pemula' },
+  { value: 'intermediate', label: 'Menengah' },
+  { value: 'advanced', label: 'Lanjutan' },
+  { value: 'mixed', label: 'Campuran' }
+];
+
 export default function QuizPage() {
   const [questions, setQuestions] = useState<Question[]>([]);
-  const [selectedTopic, setSelectedTopic] = useState("Manajemen Inventori");
+  const [selectedTopic, setSelectedTopic] = useState("Manajemen Logistik Rumah Sakit");
+  const [selectedDifficulty, setSelectedDifficulty] = useState("mixed");
   const [questionCount, setQuestionCount] = useState(5);
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState<string>("");
@@ -56,6 +86,9 @@ export default function QuizPage() {
   const [quizCompleted, setQuizCompleted] = useState(false);
   const [userAnswers, setUserAnswers] = useState<(string | number)[]>([]);
   const [quizStartTime, setQuizStartTime] = useState<Date | null>(null);
+  const [quizMode, setQuizMode] = useState<'generate' | 'existing'>('existing');
+  const [quizPaused, setQuizPaused] = useState(false);
+  const [hasResumedQuiz, setHasResumedQuiz] = useState(false);
 
   // React Query hooks
   const generateQuestionsMutation = useGenerateQuestions();
@@ -64,13 +97,45 @@ export default function QuizPage() {
   const getHintMutation = useGetHint();
   const saveQuizSessionMutation = useSaveQuizSession();
   const updateProgressMutation = useUpdateProgress();
+  const saveQuizProgressMutation = useSaveQuizProgress();
+  const updateQuizProgressMutation = useUpdateQuizProgress();
+  const deleteQuizProgressMutation = useDeleteQuizProgress();
+  
+  const { data: existingQuestions = [] } = useRandomQuestionsByTopic(selectedTopic, questionCount);
+  const { data: questionCountData = 0 } = useQuestionCount(selectedTopic);
+  const { data: savedProgress } = useGetQuizProgress(selectedTopic);
+
+  // Load saved progress on component mount
+  useEffect(() => {
+    if (savedProgress && !hasResumedQuiz) {
+      const shouldResume = confirm(
+        `Ditemukan kuis yang belum selesai untuk topik "${selectedTopic}". Apakah Anda ingin melanjutkan?`
+      );
+      
+      if (shouldResume) {
+        setQuestions(savedProgress.questions);
+        setCurrentQuestion(savedProgress.currentQuestionIndex);
+        setUserAnswers(savedProgress.userAnswers);
+        setTimeLeft(savedProgress.timeLeft);
+        setQuizStartTime(new Date(savedProgress.createdAt));
+        setQuizStarted(true);
+        setHasResumedQuiz(true);
+        toast.success("Kuis berhasil dilanjutkan!");
+      } else {
+        // Delete the saved progress if user chooses not to resume
+        if (savedProgress.id) {
+          deleteQuizProgressMutation.mutate(selectedTopic);
+        }
+      }
+    }
+  }, [savedProgress, hasResumedQuiz]);
 
   const generateQuestions = async () => {
     try {
       const result = await generateQuestionsMutation.mutateAsync({
         topic: selectedTopic,
         count: questionCount,
-        difficulty: "mixed",
+        difficulty: selectedDifficulty,
       });
 
       setQuestions(result.questions);
@@ -82,9 +147,20 @@ export default function QuizPage() {
     }
   };
 
+  const loadExistingQuestions = () => {
+    if (existingQuestions.length === 0) {
+      toast.error("Tidak ada soal tersedia untuk topik ini. Silakan buat soal baru.");
+      return;
+    }
+    
+    setQuestions(existingQuestions);
+    setUserAnswers(new Array(existingQuestions.length).fill(""));
+    toast.success(`${existingQuestions.length} soal berhasil dimuat dari bank soal!`);
+  };
+
   // Timer effect
   useEffect(() => {
-    if (quizStarted && !quizCompleted && timeLeft > 0) {
+    if (quizStarted && !quizCompleted && !quizPaused && timeLeft > 0) {
       const timer = setInterval(() => {
         setTimeLeft((prev) => prev - 1);
       }, 1000);
@@ -92,7 +168,47 @@ export default function QuizPage() {
     } else if (timeLeft === 0) {
       handleQuizComplete();
     }
-  }, [quizStarted, quizCompleted, timeLeft]);
+  }, [quizStarted, quizCompleted, quizPaused, timeLeft]);
+
+  // Auto-save progress every 30 seconds
+  useEffect(() => {
+    if (quizStarted && !quizCompleted && questions.length > 0) {
+      const autoSave = setInterval(() => {
+        saveQuizProgress();
+      }, 30000); // Save every 30 seconds
+      
+      return () => clearInterval(autoSave);
+    }
+  }, [quizStarted, quizCompleted, questions, currentQuestion, userAnswers, timeLeft]);
+
+  const saveQuizProgress = async () => {
+    if (!quizStartTime || questions.length === 0) return;
+    
+    try {
+      const progressData = {
+        topic: selectedTopic,
+        difficulty: selectedDifficulty,
+        questionCount: questions.length,
+        questions,
+        userAnswers,
+        currentQuestionIndex: currentQuestion,
+        timeLeft,
+        createdAt: new Date(),
+        lastUpdated: new Date(),
+      };
+
+      if (savedProgress?.id) {
+        await updateQuizProgressMutation.mutateAsync({
+          progressId: savedProgress.id,
+          updates: progressData,
+        });
+      } else {
+        await saveQuizProgressMutation.mutateAsync(progressData);
+      }
+    } catch (error) {
+      console.error("Error saving quiz progress:", error);
+    }
+  };
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -104,6 +220,19 @@ export default function QuizPage() {
     setQuizStarted(true);
     setQuizStartTime(new Date());
     setUserAnswers(new Array(questions.length).fill(""));
+    setCurrentQuestion(0);
+    setSelectedAnswer("");
+    setShortAnswer("");
+  };
+
+  const handlePauseQuiz = async () => {
+    setQuizPaused(!quizPaused);
+    if (!quizPaused) {
+      await saveQuizProgress();
+      toast.success("Kuis dijeda dan progress disimpan");
+    } else {
+      toast.success("Kuis dilanjutkan");
+    }
   };
 
   const handleAnswerSelect = (answer: string | number) => {
@@ -121,8 +250,8 @@ export default function QuizPage() {
   const handleNextQuestion = () => {
     if (currentQuestion < questions.length - 1) {
       setCurrentQuestion((prev) => prev + 1);
-      setSelectedAnswer("");
-      setShortAnswer("");
+      setSelectedAnswer((userAnswers[currentQuestion + 1] as string) || "");
+      setShortAnswer((userAnswers[currentQuestion + 1] as string) || "");
       setShowExplanation(false);
       setShowHint(false);
     } else {
@@ -134,6 +263,7 @@ export default function QuizPage() {
     if (currentQuestion > 0) {
       setCurrentQuestion((prev) => prev - 1);
       setSelectedAnswer((userAnswers[currentQuestion - 1] as string) || "");
+      setShortAnswer((userAnswers[currentQuestion - 1] as string) || "");
       setShowExplanation(false);
       setShowHint(false);
     }
@@ -171,7 +301,7 @@ export default function QuizPage() {
       // Save quiz session
       await saveQuizSessionMutation.mutateAsync({
         topic: selectedTopic,
-        difficulty: "mixed",
+        difficulty: selectedDifficulty,
         questionCount: questions.length,
         questions,
         userAnswers,
@@ -188,6 +318,11 @@ export default function QuizPage() {
         total: questions.length,
         timeSpent,
       });
+
+      // Delete saved progress since quiz is completed
+      if (savedProgress?.id) {
+        await deleteQuizProgressMutation.mutateAsync(selectedTopic);
+      }
 
       toast.success("Hasil kuis telah disimpan!");
     } catch (error) {
@@ -303,70 +438,124 @@ export default function QuizPage() {
               Kuis Logistik Rumah Sakit
             </h1>
             <p className="text-base sm:text-lg md:text-xl text-gray-600 mb-8">
-              Soal akan dihasilkan secara otomatis oleh AI berdasarkan topik
-              yang Anda pilih
+              Pilih soal dari bank soal yang ada atau buat soal baru dengan AI
             </p>
 
             <Card className="mb-8">
               <CardContent className="p-6">
-                <div className="space-y-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Pilih Topik
-                    </label>
-                    <Select
-                      value={selectedTopic}
-                      onValueChange={setSelectedTopic}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Manajemen Inventori">
-                          Manajemen Inventori
-                        </SelectItem>
-                        <SelectItem value="Pengadaan Medis">
-                          Pengadaan Medis
-                        </SelectItem>
-                        <SelectItem value="SOP Logistik">
-                          SOP Logistik
-                        </SelectItem>
-                        <SelectItem value="Distribusi Obat">
-                          Distribusi Obat
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                <Tabs value={quizMode} onValueChange={(value) => setQuizMode(value as 'generate' | 'existing')} className="w-full">
+                  <TabsList className="grid w-full grid-cols-2 mb-6">
+                    <TabsTrigger value="existing" className="flex items-center gap-2">
+                      <Database className="w-4 h-4" />
+                      Bank Soal ({questionCountData})
+                    </TabsTrigger>
+                    <TabsTrigger value="generate" className="flex items-center gap-2">
+                      <Brain className="w-4 h-4" />
+                      Buat Baru
+                    </TabsTrigger>
+                  </TabsList>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Jumlah Soal
-                    </label>
-                    <Select
-                      value={questionCount.toString()}
-                      onValueChange={(value) =>
-                        setQuestionCount(Number.parseInt(value))
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="5">5 Soal</SelectItem>
-                        <SelectItem value="10">10 Soal</SelectItem>
-                        <SelectItem value="15">15 Soal</SelectItem>
-                        <SelectItem value="20">20 Soal</SelectItem>
-                      </SelectContent>
-                    </Select>
+                  <div className="space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Pilih Topik
+                        </label>
+                        <Select
+                          value={selectedTopic}
+                          onValueChange={setSelectedTopic}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {TOPICS.map((topic) => (
+                              <SelectItem key={topic} value={topic}>
+                                {topic}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Tingkat Kesulitan
+                        </label>
+                        <Select
+                          value={selectedDifficulty}
+                          onValueChange={setSelectedDifficulty}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {DIFFICULTIES.map((difficulty) => (
+                              <SelectItem key={difficulty.value} value={difficulty.value}>
+                                {difficulty.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Jumlah Soal
+                      </label>
+                      <Select
+                        value={questionCount.toString()}
+                        onValueChange={(value) =>
+                          setQuestionCount(Number.parseInt(value))
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="5">5 Soal</SelectItem>
+                          <SelectItem value="10">10 Soal</SelectItem>
+                          <SelectItem value="15">15 Soal</SelectItem>
+                          <SelectItem value="20">20 Soal</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <TabsContent value="existing" className="mt-0">
+                      <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                        <div className="flex items-center space-x-2 text-blue-800 mb-2">
+                          <Database className="w-5 h-5" />
+                          <span className="font-semibold">Bank Soal</span>
+                        </div>
+                        <p className="text-blue-700 text-sm">
+                          Tersedia {questionCountData} soal untuk topik "{selectedTopic}". 
+                          Soal akan dipilih secara acak dari bank soal yang ada.
+                        </p>
+                      </div>
+                    </TabsContent>
+
+                    <TabsContent value="generate" className="mt-0">
+                      <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                        <div className="flex items-center space-x-2 text-green-800 mb-2">
+                          <Brain className="w-5 h-5" />
+                          <span className="font-semibold">AI Generator</span>
+                        </div>
+                        <p className="text-green-700 text-sm">
+                          Soal akan dihasilkan secara otomatis oleh AI berdasarkan topik dan tingkat kesulitan yang dipilih.
+                          Proses ini membutuhkan koneksi internet dan mungkin memakan waktu beberapa detik.
+                        </p>
+                      </div>
+                    </TabsContent>
                   </div>
-                </div>
+                </Tabs>
               </CardContent>
             </Card>
 
             <div className="space-y-3 sm:space-y-4 mb-8">
               <div className="flex items-center justify-center space-x-2 text-gray-600 text-sm sm:text-base">
                 <Target className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
-                <span className="text-center">Soal dihasilkan AI berdasarkan kurikulum terkini</span>
+                <span className="text-center">Progress kuis otomatis tersimpan setiap 30 detik</span>
               </div>
               <div className="flex items-center justify-center space-x-2 text-gray-600 text-sm sm:text-base">
                 <Lightbulb className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
@@ -374,18 +563,34 @@ export default function QuizPage() {
               </div>
               <div className="flex items-center justify-center space-x-2 text-gray-600 text-sm sm:text-base">
                 <Zap className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
-                <span className="text-center">Regenerasi soal otomatis untuk variasi pembelajaran</span>
+                <span className="text-center">Kuis dapat dijeda dan dilanjutkan kapan saja</span>
               </div>
             </div>
 
             {questions.length === 0 ? (
               <Button
                 size="lg"
-                onClick={generateQuestions}
-                disabled={generateQuestionsMutation.isPending}
+                onClick={quizMode === 'existing' ? loadExistingQuestions : generateQuestions}
+                disabled={
+                  (quizMode === 'existing' && questionCountData === 0) ||
+                  (quizMode === 'generate' && generateQuestionsMutation.isPending)
+                }
                 className="bg-gradient-to-r from-blue-600 to-green-600 hover:from-blue-700 hover:to-green-700 text-sm sm:text-base md:text-lg px-6 sm:px-8 py-2 sm:py-3 w-full sm:w-auto"
               >
-                {generateQuestionsMutation.isPending ? (
+                {quizMode === 'existing' ? (
+                  questionCountData === 0 ? (
+                    <>
+                      <XCircle className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
+                      <span>Tidak Ada Soal Tersedia</span>
+                    </>
+                  ) : (
+                    <>
+                      <Shuffle className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
+                      <span className="hidden sm:inline">Muat Soal dari Bank Soal</span>
+                      <span className="sm:hidden">Muat Soal</span>
+                    </>
+                  )
+                ) : generateQuestionsMutation.isPending ? (
                   <>
                     <RefreshCw className="w-4 h-4 sm:w-5 sm:h-5 mr-2 animate-spin" />
                     <span className="hidden sm:inline">Menghasilkan Soal AI...</span>
@@ -405,11 +610,11 @@ export default function QuizPage() {
                   <div className="flex items-center space-x-2 text-green-800">
                     <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
                     <span className="font-semibold text-sm sm:text-base">
-                      {questions.length} soal berhasil dihasilkan!
+                      {questions.length} soal berhasil {quizMode === 'existing' ? 'dimuat' : 'dihasilkan'}!
                     </span>
                   </div>
                   <p className="text-green-700 mt-1 text-sm sm:text-base">
-                    Topik: {selectedTopic} | Waktu: 30 menit
+                    Topik: {selectedTopic} | Kesulitan: {DIFFICULTIES.find(d => d.value === selectedDifficulty)?.label} | Waktu: 30 menit
                   </p>
                 </div>
                 <div className="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-4 justify-center">

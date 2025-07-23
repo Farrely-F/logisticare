@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { dbHelpers, Question } from './db';
+import { dbHelpers, Question, ReadingMaterial, QuizProgress } from './db';
 
 // Types for API requests
 interface GenerateQuestionsRequest {
@@ -25,6 +25,11 @@ interface GetExplanationRequest {
 interface GetHintRequest {
   question: string;
   topic: string;
+}
+
+interface GenerateReadingMaterialRequest {
+  topic: string;
+  difficulty: string;
 }
 
 // API functions
@@ -80,6 +85,20 @@ const api = {
     
     if (!response.ok) {
       throw new Error('Failed to get hint');
+    }
+    
+    return response.json();
+  },
+
+  async generateReadingMaterial(params: GenerateReadingMaterialRequest): Promise<{ readingMaterial: ReadingMaterial }> {
+    const response = await fetch('/api/generate-reading-material', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to generate reading material');
     }
     
     return response.json();
@@ -250,5 +269,209 @@ export function useUpdateProgress() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['userProgress'] });
     },
+  });
+}
+
+// Reading Materials hooks
+export function useGenerateReadingMaterial() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: api.generateReadingMaterial,
+    onSuccess: async (data, variables) => {
+      // Save to IndexedDB
+      await dbHelpers.saveReadingMaterial({
+        title: data.readingMaterial.title,
+        content: data.readingMaterial.content,
+        topic: data.readingMaterial.topic,
+        difficulty: data.readingMaterial.difficulty,
+        tags: data.readingMaterial.tags,
+        bookmarked: 0,
+        createdAt: new Date(),
+        lastRead: undefined
+      });
+      
+      // Invalidate related queries
+      queryClient.invalidateQueries({ queryKey: ['readingMaterials'] });
+    },
+  });
+}
+
+export function useReadingMaterialsByTopic(topic: string) {
+  return useQuery({
+    queryKey: ['readingMaterials', topic],
+    queryFn: () => dbHelpers.getReadingMaterialsByTopic(topic),
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+}
+
+export function useAllReadingMaterials() {
+  return useQuery({
+    queryKey: ['readingMaterials', 'all'],
+    queryFn: () => dbHelpers.getAllReadingMaterials(),
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+}
+
+export function useBookmarkedReadingMaterials() {
+  return useQuery({
+    queryKey: ['readingMaterials', 'bookmarked'],
+    queryFn: () => dbHelpers.getBookmarkedReadingMaterials(),
+    staleTime: 1 * 60 * 1000, // 1 minute
+  });
+}
+
+export function useUpdateReadingMaterialLastRead() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: dbHelpers.updateReadingMaterialLastRead,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['readingMaterials'] });
+    },
+  });
+}
+
+export function useToggleReadingMaterialBookmark() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: dbHelpers.toggleReadingMaterialBookmark,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['readingMaterials'] });
+    },
+  });
+}
+
+export function useDeleteReadingMaterial() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: dbHelpers.deleteReadingMaterial,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['readingMaterials'] });
+    },
+  });
+}
+
+// Quiz Progress hooks
+export function useSaveQuizProgress() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: dbHelpers.saveQuizProgress,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['quizProgress'] });
+    },
+  });
+}
+
+export function useGetQuizProgress(topic: string) {
+  return useQuery({
+    queryKey: ['quizProgress', topic],
+    queryFn: async () => {
+      const progress = await dbHelpers.getQuizProgress(topic);
+      return progress || null; // Return null instead of undefined
+    },
+    staleTime: 1 * 60 * 1000, // 1 minute
+  });
+}
+
+export function useUpdateQuizProgress() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: ({ progressId, updates }: { progressId: number; updates: Partial<QuizProgress> }) => 
+      dbHelpers.updateQuizProgress(progressId, updates),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['quizProgress'] });
+    },
+  });
+}
+
+export function useDeleteQuizProgress() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: dbHelpers.deleteQuizProgress,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['quizProgress'] });
+    },
+  });
+}
+
+export function useAllQuizProgress() {
+  return useQuery({
+    queryKey: ['quizProgress', 'all'],
+    queryFn: () => dbHelpers.getAllQuizProgress(),
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+}
+
+// Data Management hooks
+export function useClearAllData() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: dbHelpers.resetAllData,
+    onSuccess: () => {
+      queryClient.clear();
+    },
+  });
+}
+
+export function useResetAllData() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: dbHelpers.resetAllData,
+    onSuccess: () => {
+      queryClient.clear();
+    },
+  });
+}
+
+export function useDeleteTopicData() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: dbHelpers.resetTopicData,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['questions'] });
+      queryClient.invalidateQueries({ queryKey: ['readingMaterials'] });
+      queryClient.invalidateQueries({ queryKey: ['quizProgress'] });
+      queryClient.invalidateQueries({ queryKey: ['userProgress'] });
+    },
+  });
+}
+
+export function useResetTopicData() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: dbHelpers.resetTopicData,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['questions'] });
+      queryClient.invalidateQueries({ queryKey: ['readingMaterials'] });
+      queryClient.invalidateQueries({ queryKey: ['quizProgress'] });
+      queryClient.invalidateQueries({ queryKey: ['userProgress'] });
+    },
+  });
+}
+
+// Enhanced question selection hooks
+export function useRandomQuestionsByTopic(topic: string, count: number) {
+  return useQuery({
+    queryKey: ['questions', 'random', topic, count],
+    queryFn: () => dbHelpers.getRandomQuestionsByTopic(topic, count),
+    staleTime: 0, // Always fresh for random selection
+  });
+}
+
+export function useQuestionCount(topic?: string) {
+  return useQuery({
+    queryKey: ['questions', 'count', topic],
+    queryFn: () => topic ? dbHelpers.getQuestionCount(topic) : Promise.resolve(0),
+    staleTime: 5 * 60 * 1000, // 5 minutes
   });
 }

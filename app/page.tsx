@@ -15,6 +15,8 @@ import {
   Package,
   ClipboardList,
   TrendingUp,
+  FileText,
+  Database,
 } from "lucide-react"
 import Link from "next/link"
 
@@ -34,22 +36,22 @@ export default function HomePage() {
       color: "bg-blue-500",
     },
     {
-      icon: Target,
-      title: "Tutor AI Interaktif",
-      description: "Penjelasan jawaban, petunjuk, dan umpan balik dari AI Agent",
+      icon: FileText,
+      title: "Materi Bacaan AI",
+      description: "Materi pembelajaran komprehensif yang dihasilkan AI sesuai topik dan tingkat kesulitan",
       color: "bg-green-500",
     },
     {
-      icon: Trophy,
-      title: "Sistem Gamifikasi",
-      description: "XP, level, lencana, dan papan peringkat untuk motivasi belajar",
-      color: "bg-yellow-500",
+      icon: Target,
+      title: "Tutor AI Interaktif",
+      description: "Penjelasan jawaban, petunjuk, dan umpan balik dari AI Agent",
+      color: "bg-purple-500",
     },
     {
-      icon: BookOpen,
-      title: "Bank Soal Lengkap",
-      description: "Filter berdasarkan topik, tingkat kesulitan, dan pencarian kata kunci",
-      color: "bg-purple-500",
+      icon: Trophy,
+      title: "Progress Tersimpan",
+      description: "Kuis dapat dijeda dan dilanjutkan kapan saja dengan auto-save otomatis",
+      color: "bg-yellow-500",
     },
   ]
 
@@ -76,6 +78,20 @@ export default function HomePage() {
               </div>
             </div>
             <div className="flex items-center space-x-2 sm:space-x-4">
+              <Link href="/reading-materials">
+                <Button variant="outline" className="text-xs sm:text-sm px-2 sm:px-4 py-1.5 sm:py-2">
+                  <FileText className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
+                  <span className="hidden sm:inline">Materi</span>
+                  <span className="sm:hidden">Materi</span>
+                </Button>
+              </Link>
+              <Link href="/data-management">
+                <Button variant="outline" className="text-xs sm:text-sm px-2 sm:px-4 py-1.5 sm:py-2">
+                  <Database className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
+                  <span className="hidden sm:inline">Data</span>
+                  <span className="sm:hidden">Data</span>
+                </Button>
+              </Link>
               <Link href="/dashboard">
                 <Button variant="outline" className="text-xs sm:text-sm px-2 sm:px-4 py-1.5 sm:py-2">
                   <span className="hidden sm:inline">Dashboard</span>
@@ -121,10 +137,10 @@ export default function HomePage() {
                   Mulai Belajar Sekarang
                 </Button>
               </Link>
-              <Link href="/question-bank" className="w-full sm:w-auto">
+              <Link href="/reading-materials" className="w-full sm:w-auto">
                 <Button size="lg" variant="outline" className="text-sm sm:text-lg px-6 sm:px-8 py-3 bg-transparent w-full sm:w-auto">
-                  <BookOpen className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
-                  Jelajahi Bank Soal
+                  <FileText className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
+                  Materi Bacaan AI
                 </Button>
               </Link>
             </div>
